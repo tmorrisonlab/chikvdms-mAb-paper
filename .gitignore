@@ -1,0 +1,8 @@
+**/.DS_Store
+**/.ipynb_checkpoints
+**/.vscode
+**/.quarto
+
+**/__pycache__
+
+**/archive
