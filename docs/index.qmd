@@ -44,7 +44,7 @@ format:
     notebook-view:
       - notebook: dmslogo.ipynb
         title: "dmslogo (Jupyter)"
-        url: "https://www.github.com/meganstumpf/chikvdms-mAb-paper/docs/files/dmslogo.ipynb"
+        url: "https://www.github.com/tmorrisonlab/chikvdms-mAb-paper/docs/files/dmslogo.ipynb"
     notebook-links: global
     embed-resources: true
     output-dir: ../docs
