@@ -4046,7 +4046,7 @@ display(Image(pngfile, width=200))
     Here is a rendering of the saved figure:
 
     
-![](files/dmslogo_files/dmslogo_22_1.png)
+![](quarto_readme_files/dmslogo_files/dmslogo_22_1.png)
 
 ```{python, class="highlight-gray"}
 #| eval: false
@@ -4086,7 +4086,7 @@ display(Image(pngfile, width=200))
     Saving figure to output_files/chk152_all_newaxis.png
     Here is a rendering of the saved figure:
 
-![](files/dmslogo_files/dmslogo_24_1.png)
+![](quarto_readme_files/dmslogo_files/dmslogo_24_1.png)
     
 
 ```{python, class="highlight-gray"}
@@ -4129,7 +4129,7 @@ display(Image(pngfile, width=200))
     Here is a rendering of the saved figure:
 
     
-![](files/dmslogo_files/dmslogo_26_1.png)
+![](quarto_readme_files/dmslogo_files/dmslogo_26_1.png)
     
 
 ```{python, class="highlight-gray"}
@@ -4171,7 +4171,7 @@ display(Image(pngfile, width=200))
     Here is a rendering of the saved figure:
 
     
-![](files/dmslogo_files/dmslogo_28_1.png)
+![](quarto_readme_files/dmslogo_files/dmslogo_28_1.png)
     
 
 ```{python, class="highlight-gray"}
@@ -4200,7 +4200,7 @@ fig, axes = dmslogo.facet_plot(
 ```
 
     
-![](files/dmslogo_files/dmslogo_29_0.png)
+![](quarto_readme_files/dmslogo_files/dmslogo_29_0.png)
     
 
 ```{python, class="highlight-gray"}
@@ -4223,7 +4223,7 @@ display(Image(pngfile, width=200))
     Here is a rendering of the saved figure:
 
     
-![](files/dmslogo_files/dmslogo_30_1.png)
+![](quarto_readme_files/dmslogo_files/dmslogo_30_1.png)
     
 ```{python, class="highlight-gray"}
 #| eval: false
@@ -4263,7 +4263,7 @@ display(Image(pngfile, width=200))
     Saving figure to output_files/chk265_contacts_adom_newaxis.png
     Here is a rendering of the saved figure:
     
-![](files/dmslogo_files/dmslogo_32_1.png)
+![](quarto_readme_files/dmslogo_files/dmslogo_32_1.png)
     
 
 ```{python, class="highlight-gray"}
@@ -4304,7 +4304,7 @@ display(Image(pngfile, width=200))
     Saving figure to output_files/chk265_contacts_bdom_newaxis.png
     Here is a rendering of the saved figure:
 
-![](files/dmslogo_files/dmslogo_34_1.png)
+![](quarto_readme_files/dmslogo_files/dmslogo_34_1.png)
     
 
 </details>

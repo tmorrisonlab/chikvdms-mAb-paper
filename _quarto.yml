@@ -15,7 +15,7 @@ format:
     toc: true
 
 resources:
-  - docs/files/dmslogo_files
+  - files/dmslogo_files
 
 
 
