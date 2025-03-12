@@ -4,7 +4,7 @@
 
 The study utilized to generate these visualizations can be found at the following reference:
 
-[*Manuscript Title Here*](https://www.biorxiv.org/)
+[*Deep mutationally scanned (DMS) CHIKV E3/E2 virus library maps viral amino acid preferences and predicts viral escape mutants of neutralizing CHIKV antibodies*](https://www.biorxiv.org/content/10.1101/2024.12.04.626854v1.full)
 
 ***Megan M. Stumpf***, Tonya Brunetti, Bennett J. Davenport, Tonya Brunetti, **Thomas E. Morrison**
 
