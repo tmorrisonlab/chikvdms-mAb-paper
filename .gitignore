@@ -8,3 +8,5 @@
 **/archive
 
 /.quarto/
+
+_site/
