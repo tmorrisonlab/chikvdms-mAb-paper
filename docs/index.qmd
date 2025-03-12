@@ -15,30 +15,18 @@ citation:
   type: article-journal
   container-title: J. Virol.
   doi: "10.1101/2024.12.04.626854"
-  url: https://www.biorxiv.org/content/10.1101/2024.12.04.626854v1.full
+  url: https://pmc.ncbi.nlm.nih.gov/articles/PMC11643203/
 google-scholar: true
 csl: files/journal-of-virology.csl
 css: ../css/jupytercells.css
 format:
   html:
-    theme: flatly
     code-overflow: scroll
     highlight-style: kate
     toc: true
     toc-title: Navigation
-    toc-location: right
+    toc-location: right-body
     number-sections: true
-    other-links:
-      - text: Preprint
-        icon: file-text-fill
-        href: https://www.biorxiv.org/content/10.1101/2024.12.04.626854v1.full
-    code-links:
-      - text: Project Repo
-        icon: github
-        href: https://github.com/meganstumpf/chikvdms-mAb-paper
-      - text: megaLogo Repo
-        icon: github
-        href: https://github.com/meganstumpf/megalogo
     code-line-numbers: true
     title-block-style: default
     link-external-icon: true
@@ -95,8 +83,6 @@ For this analysis:
 *Diagram 1. Analysis Pipeline Workflow*
 
 ```{mermaid}
-%%{init: {"theme": "neutral"}}%%
-
 flowchart TB
   A{"Raw FASTQ<br>Files"}
   A --> B["Trim Reads<br><code>CutAdapt</code>"]
@@ -120,7 +106,7 @@ flowchart TB
 
 ## Sample Preparation
 
-**Brief Methods:** (For full detailed methods, see [Manuscript](https://www.biorxiv.org/content/10.1101/2024.12.04.626854v1.full))
+**Brief Methods:** (For full detailed methods, see [Manuscript](https://pmc.ncbi.nlm.nih.gov/articles/PMC11643203/))
 
 - Viral supernatants were treated with RNase ONE to remove non-virion associated RNAs.
 - RNA was isolated from treated supernatants using Trizol and treated with DNase H on-column and aliquoted into 3 x 10 uL aliquots and frozen at -80°C. 
@@ -142,6 +128,14 @@ flowchart TB
 
 ## Read Preparation and Analysis
 *Overview of code breakdown and purpose(s) for execution of each code block.*
+
+All raw FASTQ files can be found at the following Zenodo DOIs:
+
+[https://doi.org/10.5281/zenodo.14269994](https://doi.org/10.5281/zenodo.14269994)
+
+[https://doi.org/10.5281/zenodo.14510616](https://doi.org/10.5281/zenodo.14510616)
+
+[https://doi.org/10.5281/zenodo.14510626](https://doi.org/10.5281/zenodo.14510626)
 
 
 ### `FastQC`/`MultiQC`/`CutAdapt`

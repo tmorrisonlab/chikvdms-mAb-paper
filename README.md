@@ -15,7 +15,7 @@
 the GitHub documentation [here](https://meganstumpf.github.io/chikvdms-mAb-paper).**
 
 This repository hosts the analysis pipeline and software inputs used to
-analyze sequencing data generated in the following manuscript (currently
+analyze sequencing data generated in the following [manuscript](https://pmc.ncbi.nlm.nih.gov/articles/PMC11643203/) (currently
 available as a preprint):
 
 ## Reference
@@ -47,7 +47,7 @@ For this analysis:
 *Diagram 1. Analysis Pipeline Workflow*
 
 ``` mermaid
-%%{init: {"theme": "dark"}}%%
+%%{init: {"theme": "neutral"}}%%
 
 flowchart TB
   A{"Raw FASTQ<br>Files"}
@@ -105,3 +105,11 @@ block.*
 
 **For a detailed view of the code breakdown and analysis, please visit
 the GitHub documentation [here](https://meganstumpf.github.io/chikvdms-mAb-paper).**
+
+All raw FASTQ files can be found at the following Zenodo DOIs:
+
+[https://doi.org/10.5281/zenodo.14269994](https://doi.org/10.5281/zenodo.14269994)
+
+[https://doi.org/10.5281/zenodo.14510616](https://doi.org/10.5281/zenodo.14510616)
+
+[https://doi.org/10.5281/zenodo.14510626](https://doi.org/10.5281/zenodo.14510626)

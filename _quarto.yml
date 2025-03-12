@@ -6,14 +6,43 @@ website:
   navbar:
     left:
       - href: index.html
-        text: Home
-      - href: "https://github.com/meganstumpf/chikvdms-mAb-paper"
-        text: GitHub Repo
+        aria-label: Home
+        icon: house-fill
+    tools:
+      - icon: github
+        menu:
+          - href: "https://github.com/meganstumpf/chikvdms-mAb-paper"
+            text: Source Code
+            icon: github
+          - href: "https://pmc.ncbi.nlm.nih.gov/articles/PMC11643203/"
+            text: Manuscript
+            icon: file-earmark-richtext-fill
+    pinned: true
+    background: "#000000"
+
 
 format:
   html:
-    theme: flatly
+    theme:
+      light: flatly
+      dark: darkly
     toc: true
+    other-links:
+      - text: Manuscript
+        icon: file-earmark-richtext
+        href: https://pmc.ncbi.nlm.nih.gov/articles/PMC11643203/
+      - text: Morrison Lab
+        icon: virus2
+        href: https://medschool.cuanschutz.edu/immunology-and-microbiology/immu-micro-labs/morrison-lab
+    code-links:
+      - text: Project Repo
+        icon: github
+        href: https://github.com/meganstumpf/chikvdms-mAb-paper
+      - text: megaLogo Repo
+        icon: github
+        href: https://github.com/meganstumpf/megalogo
+    mermaid:
+      theme: neutral
 
 # resources:
 #   - dmslogo_files
