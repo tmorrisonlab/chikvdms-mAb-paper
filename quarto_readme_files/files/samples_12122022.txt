@@ -1,2 +1,0 @@
-wtDNA_seed12282022_subsampled_25000000
-mutDNA_lib1_seed12282022_subsampled_25000000

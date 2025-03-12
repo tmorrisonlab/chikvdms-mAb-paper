@@ -12,7 +12,7 @@
 ## Introduction
 
 **For a detailed view of the code breakdown and analysis, please visit
-the GitHub documentation [here](https://github.com/).**
+the GitHub documentation [here](https://meganstumpf.github.io/chikvdms-mAb-paper).**
 
 This repository hosts the analysis pipeline and software inputs used to
 analyze sequencing data generated in the following manuscript (currently
@@ -104,4 +104,4 @@ Resource](https://medschool.cuanschutz.edu/colorado-cancer-center/research/share
 block.*
 
 **For a detailed view of the code breakdown and analysis, please visit
-the GitHub documentation [here](https://github.com/).**
+the GitHub documentation [here](https://meganstumpf.github.io/chikvdms-mAb-paper).**

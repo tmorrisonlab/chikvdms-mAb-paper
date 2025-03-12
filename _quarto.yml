@@ -1,0 +1,21 @@
+project:
+  type: website
+
+website:
+  title: "chikvdms-mAb-paper"
+  navbar:
+    left:
+      - href: docs/quarto_readme.qmd
+        text: Home
+      - href: "https://github.com/meganstumpf/chikvdms-mAb-paper"
+        text: GitHub Repo
+
+format:
+  html:
+    toc: true
+
+resources:
+  - docs/files/dmslogo_files
+
+
+
