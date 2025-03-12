@@ -1,0 +1,4743 @@
+---
+title: "Deep mutationally scanned (DMS) CHIKV E3/E2 virus library maps viral amino acid preferences and predicts viral escape mutants of neutralizing CHIKV antibodies"
+date: 03/04/2025
+author: 
+  - name: Megan M. Stumpf
+    affiliation:
+      - name: University of Colorado - Anschutz Medical Campus
+        city: Aurora
+        state: CO
+  - name: Tonya Brunetti
+  - name: Bennett J. Davenport
+  - name: Mary K. McCarthy
+  - name: Thomas E. Morrison
+citation: 
+  type: article-journal
+  container-title: J. Virol.
+  doi: "10.1101/2024.12.04.626854"
+  url: https://www.biorxiv.org/content/10.1101/2024.12.04.626854v1.full
+google-scholar: true
+csl: files/journal-of-virology.csl
+css: ../css/jupytercells.css
+format:
+  html:
+    theme: flatly
+    code-overflow: scroll
+    highlight-style: kate
+    toc: true
+    toc-title: Navigation
+    toc-location: right
+    number-sections: true
+    other-links:
+      - text: Preprint
+        icon: file-text-fill
+        href: https://www.biorxiv.org/content/10.1101/2024.12.04.626854v1.full
+    code-links:
+      - text: Project Repo
+        icon: github
+        href: https://github.com/meganstumpf/chikvdms-mAb-paper
+      - text: megaLogo Repo
+        icon: github
+        href: https://github.com/meganstumpf/megalogo
+    code-line-numbers: true
+    title-block-style: default
+    link-external-icon: true
+    link-external-newwindow: true
+    lightbox:
+      match: auto
+      desc-position: top
+      loop: false
+    crossref:
+      custom:
+        - key: fil
+          kind: float
+          reference-prefix: File
+          caption-prefix: File
+    notebook-view:
+      - notebook: dmslogo.ipynb
+        title: "dmslogo (Jupyter)"
+        url: "https://www.github.com/meganstumpf/chikvdms-mAb-paper/docs/files/dmslogo.ipynb"
+    notebook-links: global
+    embed-resources: true
+    output-dir: ../docs
+    jupyter: true
+---
+
+## Introduction {.unnumbered}
+
+This document describes the analysis pipeline and software inputs used to analyze sequencing data generated in the following manuscript (currently available as a preprint):
+
+:::{.callout-note}
+## Reference
+> M. Stumpf M, Brunetti T, J. Davenport B, K. McCarthy M, E. Morrison T. 2025 (in press). Deep mutationally scanned (DMS) CHIKV E3/E2 virus library maps viral amino acid preferences and predicts viral escape mutants of neutralizing CHIKV antibodies. *J. Virol.*
+:::
+
+## Software Requirements
+
+For this analysis:
+
+- [fastqc](https://www.bioinformatics.babraham.ac.uk/projects/fastqc/)
+- [multiqc](https://github.com/MultiQC/MultiQC)
+- [cutadapt](https://github.com/marcelm/cutadapt/)
+- [seqtk](https://github.com/lh3/seqtk)
+- [virvarseq](https://sourceforge.net/projects/virtools/files/)
+- [dms_tools2](https://github.com/jbloomlab/dms_tools2)
+- [megalogo](https://github.com/meganstumpf/megalogo)
+- [dmslogo](https://github.com/jbloomlab/dmslogo)
+- [dms-viz](https://github.com/dms-viz)
+- [R >= v4.2.1](https://www.r-project.org/)
+
+
+## Analysis Pipeline
+
+<center>
+
+*Diagram 1. Analysis Pipeline Workflow*
+
+```{mermaid}
+%%{init: {"theme": "neutral"}}%%
+
+flowchart TB
+  A{"Raw FASTQ<br>Files"}
+  A --> B["Trim Reads<br><code>CutAdapt</code>"]
+  A -.-> C("QC Check<br><code>FastQC</code><br><code>MultiQC</code>")
+  B -.-> D("QC Check<br><code>FastQC</code><br><code>MultiQC</code>")
+  B --> E["Subsample<br>Reads<br><code>seqtk</code>"]
+  E -.-> F("QC Check<br><code>FastQC</code><br><code>MultiQC</code>")
+  E --> G["Alignment/<br>Codon Inference"<br><code>VirVarSeq</code>]
+  G --> H["Formatting for<br><code>batchdiffsel</code>"]
+  G --> I["Calculate<br><code>ndet</code>"]
+  G -.-> J("QC Check")
+  I --> K["Visualization<br><code>dms-viz</code>"]
+  H --> L["Differential<br>Selection<br><code>batchdiffsel</code>"]
+  L --> K
+  L --> M["Visualization<br><code>dmslogo</code>"]
+  I --> N["Visualization<br><code>megaLogo</code>"]
+```
+
+</center>
+
+
+## Sample Preparation
+
+**Brief Methods:** (For full detailed methods, see [Manuscript](https://www.biorxiv.org/content/10.1101/2024.12.04.626854v1.full))
+
+- Viral supernatants were treated with RNase ONE to remove non-virion associated RNAs.
+- RNA was isolated from treated supernatants using Trizol and treated with DNase H on-column and aliquoted into 3 x 10 uL aliquots and frozen at -80°C. 
+- RNA aliquots were thawed and reverse transcribed using SuperScript IV following manufacturer recommendations. 
+- Full cDNA reaction volume served as a template for an amplicon PCR reaction to amplify the mutagenized CHIKV p62 region for sequencing.
+- PCR products were PCR purified and eluted in molecular grade water.
+
+
+## Library Preparation
+
+**Completed at the [CU Anschutz Genomics Shared Resource](https://medschool.cuanschutz.edu/colorado-cancer-center/research/shared-resources/genomics)**
+
+- Libraries were mechanically sheared via Covaris
+- Fragments were barcoded using Ovation Ultralow System V2 (Tecan)
+- Barcoded libraries were batched and loaded onto an Illumina NovaSeq 6000
+- Each sample was sequenced with 2x150bp reads at a depth of 25M paired-end reads (50M pairs)
+- Samples were demultiplexed and RAW fastq files delivered
+
+
+## Read Preparation and Analysis
+*Overview of code breakdown and purpose(s) for execution of each code block.*
+
+
+### `FastQC`/`MultiQC`/`CutAdapt`
+Checking quality metrics and removing adapter sequences prior to aligning to the CHIKV reference genome.
+
+- Raw fastq files were analyzed for QC metrics using `FastQC` and summary reports generated via `MultiQC`
+- Samples were trimmed of Illumina universal adapters via `cutadapt`
+- QC metrics were evaluated again with `FastQC` and `MultiQC`
+- Trimmed samples were subsampled to 25M reads per pair via `seqtk`
+- QC metrics were evaluated once more with `FastQC` and `MultiQC`
+
+::: {.callout-note}
+Samples were prepared and sequenced across 3 separate runs (12/12/2022, 06/13/2023, and 08/01/2023) depending on the sample type and code was executed independently for each run on individual seeds. 
+
+*All three runs have been combined within code blocks for brevity but each contain their own wtDNA control for error-correction in downstream analyses.*
+:::
+
+To clean and prep all reads, the following `shell` scripts were run:
+
+<details>
+<summary>Expand to View Code Blocks</summary>
+
+```{.bash filename="step1a_raws_qc.sh"}
+#!/bin/bash
+
+# Run fastqc to check raw read sequencing quality for each run
+~/software/FastQC/fastqc --outdir ./12122022/raw_fastqc_reports/ --threads 1 ./12122022/raw_fastq_files/*.fastq.gz
+~/software/FastQC/fastqc --outdir ./06132023/raw_fastqc_reports/ --threads 1 ./06132023/raw_fastq_files/*.fastq.gz
+~/software/FastQC/fastqc --outdir ./08012023/raw_fastqc_reports/ --threads 9 ./08012023/raw_fastq_files/*.fastq.gz
+
+# Combine raw fastqc files into multiqc report for each run
+multiqc ./12122022/raw_fastqc_reports/ --filename raw_multiqc_report.html --outdir ./12122022/multiqc_reports/
+multiqc ./06132023/raw_fastqc_reports/ --filename raw_multiqc_report.html --outdir ./06132023/multiqc_reports/
+multiqc ./08012023/raw_fastqc_reports/ --filename raw_multiqc_report.html --outdir ./08012023/multiqc_reports/
+```
+
+```{.bash filename="step1b_trimming.sh"}
+#!/bin/bash
+
+# Trim reads using cutadapt for all samples for each run
+### 12122022
+## wtDNA
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o ./12122022/trimmed_fastq_files/tr_wtDNA_S17_L003_R1_001.fastq -p ./12122022/trimmed_fastq_files/tr_wtDNA_S17_L003_R2_001.fastq wtDNA_S17_L003_R1_001.fastq.gz wtDNA_S17_L003_R2_001.fastq.gz --nextseq-trim=20 -m 10 --json=wtDNA.cutadapt.json
+
+## mutDNA
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o ./12122022/trimmed_fastq_files/tr_mutDNA_lib1_S18_L003_R1_001.fastq -p ./12122022/trimmed_fastq_files/tr_mutDNA_lib1_S18_L003_R2_001.fastq mutDNA_lib1_S18_L003_R1_001.fastq.gz mutDNA_lib1_S18_L003_R2_001.fastq.gz --nextseq-trim=20 -m 10 --json=mutDNA.cutadapt.json
+
+### 06132023
+## wtDNA
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o ./06132023/trimmed_fastq_files/tr_wtDNA_S25_L002_R1_001.fastq -p ./06132023/trimmed_fastq_files/tr_wtDNA_S25_L002_R2_001.fastq wtDNA_S25_L002_R1_001.fastq.gz wtDNA_S25_L002_R2_001.fastq.gz --nextseq-trim=20 -m 10 --json=wtDNA.cutadapt.json
+
+## mutVirus_p1
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o ./06132023/trimmed_fastq_files/tr_mutVirus_lib1_p1_S26_L002_R1_001.fastq -p ./06132023/trimmed_fastq_files/tr_mutVirus_lib1_p1_S26_L002_R2_001.fastq mutVirus_lib1_p1_S26_L002_R1_001.fastq.gz mutVirus_lib1_p1_S26_L002_R2_001.fastq.gz --nextseq-trim=20 -m 10 --json=mutVirus.p1.cutadapt.json
+
+## mutVirus_p2
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o ./06132023/trimmed_fastq_files/tr_mutVirus_lib1_p2_S27_L002_R1_001.fastq -p ./06132023/trimmed_fastq_files/tr_mutVirus_lib1_p2_S27_L002_R2_001.fastq mutVirus_lib1_p2_S27_L002_R1_001.fastq.gz mutVirus_lib1_p2_S27_L002_R2_001.fastq.gz --nextseq-trim=20 -m 10 --json=mutVirus.p2.cutadapt.json
+
+### 08012023
+## wtDNA
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o ./08012023/trimmed_fastq_files/tr_wtDNA_S73_L003_R1_001.fastq -p ./08012023/trimmed_fastq_files/tr_wtDNA_S73_L003_R2_001.fastq wtDNA_S73_L003_R1_001.fastq.gz wtDNA_S73_L003_R2_001.fastq.gz --nextseq-trim=20 -m 10 --json=wtDNA.cutadapt.json
+
+## mutVirus_CHK11_1-1
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o ./08012023/trimmed_fastq_files/tr_mutVirus_CHK11_1_1_S80_L003_R1_001.fastq -p ./08012023/trimmed_fastq_files/tr_mutVirus_CHK11_1_1_S80_L003_R2_001.fastq mutVirus_CHK11_1_1_S80_L003_R1_001.fastq.gz mutVirus_CHK11_1_1_S80_L003_R2_001.fastq.gz --nextseq-trim=20 -m 10 --json=mutVirus.CHK11_1-1.cutadapt.json
+
+## mutVirus_CHK11_3-1
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o ./08012023/trimmed_fastq_files/tr_mutVirus_CHK11_3_1_S81_L003_R1_001.fastq -p ./08012023/trimmed_fastq_files/tr_mutVirus_CHK11_3_1_S81_L003_R2_001.fastq mutVirus_CHK11_3_1_S81_L003_R1_001.fastq.gz mutVirus_CHK11_3_1_S81_L003_R2_001.fastq.gz --nextseq-trim=20 -m 10 --json=mutVirus.CHK11_3-1.cutadapt.json
+
+## mutVirus_CHK152_1-2
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o ./08012023/trimmed_fastq_files/tr_mutVirus_CHK152_1_2_S76_L003_R1_001.fastq -p ./08012023/trimmed_fastq_files/tr_mutVirus_CHK152_1_2_S76_L003_R2_001.fastq mutVirus_CHK152_1_2_S76_L003_R1_001.fastq.gz mutVirus_CHK152_1_2_S76_L003_R2_001.fastq.gz --nextseq-trim=20 -m 10 --json=mutVirus.CHK152_1-2.cutadapt.json
+
+## mutVirus_CHK152_2-1
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o ./08012023/trimmed_fastq_files/tr_mutVirus_CHK152_2_1_S77_L003_R1_001.fastq -p ./08012023/trimmed_fastq_files/tr_mutVirus_CHK152_2_1_S77_L003_R2_001.fastq mutVirus_CHK152_2_1_S77_L003_R1_001.fastq.gz mutVirus_CHK152_2_1_S77_L003_R2_001.fastq.gz --nextseq-trim=20 -m 10 --json=mutVirus.CHK152_2-1.cutadapt.json
+
+## mutVirus_CHK265_1-2
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o ./08012023/trimmed_fastq_files/tr_mutVirus_CHK265_1_2_S78_L003_R1_001.fastq -p ./08012023/trimmed_fastq_files/tr_mutVirus_CHK265_1_2_S78_L003_R2_001.fastq mutVirus_CHK265_1_2_S78_L003_R1_001.fastq.gz mutVirus_CHK265_1_2_S78_L003_R2_001.fastq.gz --nextseq-trim=20 -m 10 --json=mutVirus.CHK265_1-2.cutadapt.json
+
+## mutVirus_CHK265_2-3
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o ./08012023/trimmed_fastq_files/tr_mutVirus_CHK265_2_3_S79_L003_R1_001.fastq -p ./08012023/trimmed_fastq_files/tr_mutVirus_CHK265_2_3_S79_L003_R2_001.fastq mutVirus_CHK265_2_3_S79_L003_R1_001.fastq.gz mutVirus_CHK265_2_3_S79_L003_R2_001.fastq.gz --nextseq-trim=20 -m 10 --json=mutVirus.CHK265_2-3.cutadapt.json
+
+## mutVirus_only_1-2
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o ./08012023/trimmed_fastq_files/tr_mutVirus_only_1_2_S74_L003_R1_001.fastq -p ./08012023/trimmed_fastq_files/tr_mutVirus_only_1_2_S74_L003_R2_001.fastq mutVirus_only_1_2_S74_L003_R1_001.fastq.gz mutVirus_only_1_2_S74_L003_R2_001.fastq.gz --nextseq-trim=20 -m 10 --json=mutVirus.only_1-2.cutadapt.json
+
+## mutVirus_only_2-1
+cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -o ./08012023/trimmed_fastq_files/tr_mutVirus_only_2_1_S75_L003_R1_001.fastq -p ./08012023/trimmed_fastq_files/tr_mutVirus_only_2_1_S75_L003_R2_001.fastq mutVirus_only_2_1_S75_L003_R1_001.fastq.gz mutVirus_only_2_1_S75_L003_R2_001.fastq.gz --nextseq-trim=20 -m 10 --json=mutVirus.only_2-1.cutadapt.json
+```
+
+```{.bash filename="step1c_trimmed_qc.sh"}
+#!/bin/bash
+
+# Recheck quality of all trimmed samples for each run
+~/software/FastQC/fastqc --outdir ./12122022/trimmed_fastqc_reports/ --threads 9 ./12122022/trimmed_fastqc_files/*.fastq
+~/software/FastQC/fastqc --outdir ./06132023/trimmed_fastqc_reports/ --threads 2 ./06132023/trimmed_fastqc_files/*.fastq
+~/software/FastQC/fastqc --outdir ./08012023/trimmed_fastqc_reports/ --threads 9 ./08012023/trimmed_fastqc_files/*.fastq
+
+# Combine trimmed fastqc files into multiqc report for each run
+multiqc ./12122022/trimmed_fastqc_reports/ --filename trimmed_multiqc_report.html --outdir ./12122022/multiqc_reports/
+multiqc ./06132023/trimmed_fastqc_reports/ --filename trimmed_multiqc_report.html --outdir ./06132023/multiqc_reports/
+multiqc ./08012023/trimmed_fastqc_reports/ --filename trimmed_multiqc_report.html --outdir ./08012023/multiqc_reports/
+```
+
+```{.bash filename="step1d_subsampling.sh"}
+#!/bin/bash
+
+# Subsample trimmed fastq files to 25000000 for each run
+### 12122022
+/usr/bin/time seqtk sample -s12282022 ./12122022/trimmed_fastq_files/tr_wtDNA_S17_L003_R1_001.fastq 25000000 | gzip > ./12122022/subsampled_fastq_files/wtDNA_seed12282022_subsampled_25000000_R1.fastq.gz
+/usr/bin/time seqtk sample -s12282022 ./12122022/trimmed_fastq_files/tr_wtDNA_S17_L003_R2_001.fastq 25000000 | gzip > ./12122022/subsampled_fastq_files/wtDNA_seed12282022_subsampled_25000000_R2.fastq.gz
+/usr/bin/time seqtk sample -s12282022 ./12122022/trimmed_fastq_files/tr_mutDNA_lib1_S18_L003_R1_001.fastq 25000000 | gzip > ./12122022/subsampled_fastq_files/mutDNA_lib1_seed12282022_subsampled_25000000_R1.fastq.gz
+/usr/bin/time seqtk sample -s12282022 ./12122022/trimmed_fastq_files/tr_mutDNA_lib1_S18_L003_R2_001.fastq 25000000 | gzip > ./12122022/subsampled_fastq_files/mutDNA_lib1_seed12282022_subsampled_25000000_R2.fastq.gz
+
+### 06132023
+/usr/bin/time seqtk sample -s06212023 ./06132023/trimmed_fastq_files/tr_wtDNA_S25_L002_R1_001.fastq 25000000 | gzip > ./06132023/subsampled_fastq_files/wtDNA_seed06212023_subsampled_25000000_R1.fastq.gz
+/usr/bin/time seqtk sample -s06212023 ./06132023/trimmed_fastq_files/tr_wtDNA_S25_L002_R2_001.fastq 25000000 | gzip > ./06132023/subsampled_fastq_files/wtDNA_seed06212023_subsampled_25000000_R2.fastq.gz
+/usr/bin/time seqtk sample -s06212023 ./06132023/trimmed_fastq_files/tr_mutVirus_lib1_p1_S26_L002_R1_001.fastq 25000000 | gzip > ./06132023/subsampled_fastq_files/mutVirus_p1_seed06212023_subsampled_25000000_R1.fastq.gz
+/usr/bin/time seqtk sample -s06212023 ./06132023/trimmed_fastq_files/tr_mutVirus_lib1_p1_S26_L002_R2_001.fastq 25000000 | gzip > ./06132023/subsampled_fastq_files/mutVirus_p1_seed06212023_subsampled_25000000_R2.fastq.gz
+/usr/bin/time seqtk sample -s06212023 ./06132023/trimmed_fastq_files/tr_mutVirus_lib1_p2_S27_L002_R1_001.fastq 25000000 | gzip > ~./06132023/subsampled_fastq_files/mutVirus_p2_seed06212023_subsampled_25000000_R1.fastq.gz
+/usr/bin/time seqtk sample -s06212023 ./06132023/trimmed_fastq_files/tr_mutVirus_lib1_p2_S27_L002_R2_001.fastq 25000000 | gzip > ./06132023/subsampled_fastq_files/mutVirus_p2_seed06212023_subsampled_25000000_R2.fastq.gz
+
+### 08012023
+/usr/bin/time seqtk sample -s08122023 ./08012023/trimmed_fastq_files/tr_wtDNA_S73_L003_R2_001.fastq 25000000 | gzip > ./08012023/subsampled_fastq_files/wtDNA_seed08122023_subsampled_25000000_R2.fastq.gz
+/usr/bin/time seqtk sample -s08122023 ./08012023/trimmed_fastq_files/tr_mutVirus_CHK11_1_1_S80_L003_R1_001.fastq 25000000 | gzip > ./08012023/subsampled_fastq_files/mutVirus_CHK11_1_1_seed08122023_subsampled_25000000_R1.fastq.gz
+/usr/bin/time seqtk sample -s08122023 ./08012023/trimmed_fastq_files/tr_mutVirus_CHK11_1_1_S80_L003_R2_001.fastq 25000000 | gzip > ./08012023/subsampled_fastq_files/mutVirus_CHK11_1_1_seed08122023_subsampled_25000000_R2.fastq.gz
+/usr/bin/time seqtk sample -s08122023 ./08012023/trimmed_fastq_files/tr_mutVirus_CHK11_3_1_S81_L003_R1_001.fastq 25000000 | gzip > ./08012023/subsampled_fastq_files/mutVirus_CHK11_3_1_seed08122023_subsampled_25000000_R1.fastq.gz
+/usr/bin/time seqtk sample -s08122023 ./08012023/trimmed_fastq_files/tr_mutVirus_CHK11_3_1_S81_L003_R2_001.fastq 25000000 | gzip > ./08012023/subsampled_fastq_files/mutVirus_CHK11_3_1_seed08122023_subsampled_25000000_R2.fastq.gz
+/usr/bin/time seqtk sample -s08122023 ./08012023/trimmed_fastq_files/tr_mutVirus_CHK152_1_2_S76_L003_R1_001.fastq 25000000 | gzip > ./08012023/subsampled_fastq_files/mutVirus_CHK152_1_2_seed08122023_subsampled_25000000_R1.fastq.gz
+/usr/bin/time seqtk sample -s08122023 ./08012023/trimmed_fastq_files/tr_mutVirus_CHK152_1_2_S76_L003_R2_001.fastq 25000000 | gzip > ./08012023/subsampled_fastq_files/mutVirus_CHK152_1_2_seed08122023_subsampled_25000000_R2.fastq.gz
+/usr/bin/time seqtk sample -s08122023 ./08012023/trimmed_fastq_files/tr_mutVirus_CHK152_2_1_S77_L003_R1_001.fastq 25000000 | gzip > ./08012023/subsampled_fastq_files/mutVirus_CHK152_2_1_seed08122023_subsampled_25000000_R1.fastq.gz
+/usr/bin/time seqtk sample -s08122023 ./08012023/trimmed_fastq_files/tr_mutVirus_CHK152_2_1_S77_L003_R2_001.fastq 25000000 | gzip > ./08012023/subsampled_fastq_files/mutVirus_CHK152_2_1_seed08122023_subsampled_25000000_R2.fastq.gz
+/usr/bin/time seqtk sample -s08122023 ./08012023/trimmed_fastq_files/tr_mutVirus_CHK265_1_2_S78_L003_R1_001.fastq 25000000 | gzip > ./08012023/subsampled_fastq_files/mutVirus_CHK265_1_2_seed08122023_subsampled_25000000_R1.fastq.gz
+/usr/bin/time seqtk sample -s08122023 ./08012023/trimmed_fastq_files/tr_mutVirus_CHK265_1_2_S78_L003_R2_001.fastq 25000000 | gzip > ./08012023/subsampled_fastq_files/mutVirus_CHK265_1_2_seed08122023_subsampled_25000000_R2.fastq.gz
+/usr/bin/time seqtk sample -s08122023 ./08012023/trimmed_fastq_files/tr_mutVirus_CHK265_2_3_S79_L003_R1_001.fastq 25000000 | gzip > ./08012023/subsampled_fastq_files/mutVirus_CHK265_2_3_seed08122023_subsampled_25000000_R1.fastq.gz
+/usr/bin/time seqtk sample -s08122023 ./08012023/trimmed_fastq_files/tr_mutVirus_CHK265_2_3_S79_L003_R2_001.fastq 25000000 | gzip > ./08012023/subsampled_fastq_files/mutVirus_CHK265_2_3_seed08122023_subsampled_25000000_R2.fastq.gz
+/usr/bin/time seqtk sample -s08122023 ./08012023/trimmed_fastq_files/tr_mutVirus_only_1_2_S74_L003_R1_001.fastq 25000000 | gzip > ./08012023/subsampled_fastq_files/mutVirus_only_1_2_seed08122023_subsampled_25000000_R1.fastq.gz
+/usr/bin/time seqtk sample -s08122023 ./08012023/trimmed_fastq_files/tr_mutVirus_only_1_2_S74_L003_R2_001.fastq 25000000 | gzip > ./08012023/subsampled_fastq_files/mutVirus_only_1_2_seed08122023_subsampled_25000000_R2.fastq.gz
+/usr/bin/time seqtk sample -s08122023 ./08012023/trimmed_fastq_files/tr_mutVirus_only_2_1_S75_L003_R1_001.fastq 25000000 | gzip > ./08012023/subsampled_fastq_files/mutVirus_only_2_1_seed08122023_subsampled_25000000_R1.fastq.gz
+/usr/bin/time seqtk sample -s08122023 ./08012023/trimmed_fastq_files/tr_mutVirus_only_2_1_S75_L003_R2_001.fastq 25000000 | gzip > ./08012023/subsampled_fastq_files/mutVirus_only_2_1_seed08122023_subsampled_25000000_R2.fastq.gz
+```
+
+```{.bash filename="step1e_subsampled_qc.sh"}
+#!/bin/bash
+
+# Recheck quality of subsampled reads for each run
+~/software/FastQC/fastqc --outdir ./12222022/subsampled_fastqc_reports/ --threads 6 ./12222022/subsampled_fastqc_files/*.fastq.gz
+~/software/FastQC/fastqc --outdir ./06132023/subsampled_fastqc_reports/ --threads 6 ./06132023/subsampled_fastqc_files/*.fastq.gz
+~/software/FastQC/fastqc --outdir ./08012023/subsampled_fastqc_reports/ --threads 9 ./08012023/subsampled_fastqc_files/*.fastq.gz
+
+# Combine subsampled/trimmed fastqc files into multiqc report for each run
+multiqc ./12122022/subsampled_fastqc_reports/ --filename trimmed_subsampled_multiqc_report.html --outdir ./12122022/multiqc_reports/
+multiqc ./06132023/subsampled_fastqc_reports/ --filename trimmed_subsampled_multiqc_report.html --outdir ./06132023/multiqc_reports/
+multiqc ./08012023/subsampled_fastqc_reports/ --filename trimmed_subsampled_multiqc_report.html --outdir ./08012023/multiqc_reports/
+```
+</details>
+
+
+### `VirVarSeq`
+*Alignment of subsampled clean reads to the WT mutagenized CHIKV p62 fragment sequence and codon metric calling with VirVarSeq software.*
+
+Software was downloaded from [SourceForge](https://sourceforge.net/projects/virtools/) and the relevant manuscript can be found [here](https://pubmed.ncbi.nlm.nih.gov/25178459/).
+
+#### *12-12-2022* {.unnumbered}
+
+Samples prefix file input for `VirVarSeq`:
+
+*samples.txt*
+```{r}
+#| echo: false
+#| label: samples_12122022
+
+samples <- read.csv("~/git/chikvdms-mAb-paper/docs/files/samples_12122022.txt", header = FALSE, sep = "\t")
+print(row.names = FALSE, unname(samples), right = FALSE)
+```
+
+<br>
+To execute `VirVarSeq`, the following `shell` script was run:
+
+<details>
+<summary>Expand to View Code Block</summary>
+
+```{.bash filename="step2_run12292022.sh"}
+#!/bin/bash
+
+export R_LIBS_USER=./12292022/VirVarSeq/R/lib
+export PERL5LIB=./12292022/VirVarSeq/lib
+indir=./12292022/VirVarSeq/fastq
+outdir=./12292022/VirVarSeq/results
+samples=./12292022/VirVarSeq/samples.txt
+ref=../ref/pCHIKV_AF15561.fasta
+startpos=9821
+endpos=15701
+region_start=9821
+region_len=1218
+qv=0
+
+./map_vs_ref.pl --samplelist $samples --ref $ref --indir $indir --outdir $outdir --mapping paired > VirVarSeq.log 2>&1
+./consensus.pl --samplelist $samples --ref $ref --indir $indir --outdir $outdir --start $startpos --end $endpos >> VirVarSeq.log 2>&1
+./map_vs_consensus.pl --samplelist $samples --indir $indir --outdir $outdir --mapping paired >> VirVarSeq.log 2>&1
+./codon_table.pl --samplelist $samples --ref $ref --outdir $outdir --start=$region_start --len=$region_len --trimming=0 --qual=$qv >> VirVarSeq.log 2>&1
+./mixture_model.pl --samplelist $samples --outdir $outdir --ref $ref --start=$region_start --len=$region_len --qual=$qv >> VirVarSeq.log 2>&1 
+```
+</details>
+
+#### *06-13-2023* {.unnumbered}
+
+Samples prefix file input for `VirVarSeq`:
+
+*samples.txt*
+```{r}
+#| echo: false
+#| label: samples_06132023
+
+samples <- read.csv("~/git/chikvdms-mAb-paper/docs/files/samples_06132023.txt", header = FALSE, sep = "\t")
+print(row.names = FALSE, unname(samples), right = FALSE)
+```
+
+<br>
+To execute `VirVarSeq`, the following `shell` script was run:
+
+<details>
+<summary>Expand to View Code Block</summary>
+
+```{.bash filename="step2_run06132023.sh"}
+#!/bin/bash
+
+export R_LIBS_USER=./06132023/VirVarSeq/R/lib
+export PERL5LIB=./06132023/VirVarSeq/lib
+indir=./06132023/VirVarSeq/subsampled_fastq_files
+outdir=./06132023/VirVarSeq/results
+samples=./06132023/VirVarSeq/samples.txt
+ref=../ref/pCHIKV_AF15561.fasta
+startpos=9821
+endpos=15701
+region_start=9821
+region_len=1218
+qv=0
+
+/usr/bin/time ./map_vs_ref.pl --samplelist $samples --ref $ref --indir $indir --outdir $outdir --mapping paired > VirVarSeq.log 2>&1
+/usr/bin/time ./consensus.pl --samplelist $samples --ref $ref --indir $indir --outdir $outdir --start $startpos --end $endpos >> VirVarSeq.log 2>&1
+/usr/bin/time ./map_vs_consensus.pl --samplelist $samples --indir $indir --outdir $outdir --mapping paired >> VirVarSeq.log 2>&1
+/usr/bin/time ./codon_table.pl --samplelist $samples --ref $ref --outdir $outdir --start=$region_start --len=$region_len --trimming=0 --qual=$qv >> VirVarSeq.log 2>&1
+/usr/bin/time ./mixture_model.pl --samplelist $samples --outdir $outdir --ref $ref --start=$region_start --len=$region_len --qual=$qv >> VirVarSeq.log 2>&1 
+```
+
+</details>
+
+#### *08-01-2023* {.unnumbered}
+
+Samples prefix file input for `VirVarSeq`:
+
+*samples.txt*
+```{r}
+#| echo: false
+#| label: samples_08012023
+
+samples <- read.csv("~/git/chikvdms-mAb-paper/docs/files/samples_08012023.txt", header = FALSE, sep = "\t")
+print(row.names = FALSE, unname(samples), right = FALSE)
+```
+
+<br>
+To execute `VirVarSeq`, the following `shell` script was run:
+
+<details>
+<summary>Expand to View Code Block</summary>
+
+```{.bash filename="step2_run08132023.sh"}
+#!/bin/bash
+
+export R_LIBS_USER=./08012023/VirVarSeq/R/lib
+export PERL5LIB=./08012023/VirVarSeq/lib
+indir=./08012023/subsampled_fastq_files
+outdir=./08012023/VirVarSeq/results
+samples=./08012023/VirVarSeq/samples.txt
+ref=../ref/pCHIKV_AF15561.fasta
+startpos=9821
+endpos=15701
+region_start=9821
+region_len=1218
+qv=0
+
+/usr/bin/time ./map_vs_ref.pl --samplelist $samples --ref $ref --indir $indir --outdir $outdir --mapping paired > VirVarSeq.log 2>&1
+/usr/bin/time ./consensus.pl --samplelist $samples --ref $ref --indir $indir --outdir $outdir --start $startpos --end $endpos >> VirVarSeq.log 2>&1
+/usr/bin/time ./map_vs_consensus.pl --samplelist $samples --indir $indir --outdir $outdir --mapping paired >> VirVarSeq.log 2>&1
+/usr/bin/time ./codon_table.pl --samplelist $samples --ref $ref --outdir $outdir --start=$region_start --len=$region_len --trimming=0 --qual=$qv >> VirVarSeq.log 2>&1
+/usr/bin/time ./mixture_model.pl --samplelist $samples --outdir $outdir --ref $ref --start=$region_start --len=$region_len --qual=$qv >> VirVarSeq.log 2>&1 
+```
+
+</details>
+
+
+### $ndet$
+
+*Creation of lineplots to visualize mutagenesis efficiency and selection results for virus library generation.*
+
+#### Calculation
+
+To calculate the level of diversity tolerated for all iterations of the CHIKV-p62-DMS virus libraries, the number of detected amino acids ($ndet$) was determined using the following in-house `R` code.
+
+In brief we first filtered the `VirVarSeq` output codon matrices with the following conditions: 
+
+1. Must have greater than 100 counts for that codon-position pair
+2. Must have an average forward and reverse read minimum Phred quality score of 24. 
+
+Then, the remaining unique residues were summed for each position ($ndet$).
+
+::: {.callout-warning}
+The code process below is heavily `R` dependent and not well suited for large batches of samples. Moving forward, pipeline will be converted to a loop-based algorithm and executed with remote compute nodes.
+:::
+
+<details>
+<summary>Expand to View Code Block</summary>
+
+```{.R filename="step3a_diversity_analysis.R"}
+#!/usr/bin/Rscript
+
+# GOAL: Count matrix processing for 'ndet' calculations
+# Packages to load
+library(plyr)
+library(dplyr)
+library(reshape2)
+library(tidyr)
+library(stringr)
+
+# Set working directory to find VirVarSeq output matrices
+setwd("./06132023/VirVarSeq/results/mixture_model/")
+
+# List file names but then need to open in excel and save as CSV file
+list.files(path = ".", pattern = ".codon")
+
+# Confirm all files successfully converted to .csv
+list.files(path = ".", pattern = "Q.10.csv")
+
+# Read in CSV files from VirVarSeq
+df1 <- read.csv("wtDNA_seed06212023_subsampled_25000000.Q.10.csv")
+df2 <- read.csv("mutVirus_p1_seed06212023_subsampled_25000000.Q.10.csv")
+df3 <- read.csv("mutVirus_p2_seed06212023_subsampled_25000000.Q.10.csv")
+df4 <- read.csv("mutDNA/mutDNA_r1_standard_prep_seed12282022_subsampled_25000000.Q.10.csv")
+
+# Merge position and AA into single field in order to be able to sort/combine/melt/etc.
+df1$MERGE <- paste(df1$POSITION, df1$CODON)
+df2$MERGE <- paste(df2$POSITION, df2$CODON)
+df3$MERGE <- paste(df3$POSITION, df3$CODON)
+df4$MERGE <- paste(df4$POSITION, df4$CODON)
+
+# Subset out only the mutated regions
+df1_subset <- df1 %>%
+  filter(POSITION <= 398) %>%
+  filter(POSITION >= 9)
+
+df2_subset <- df2 %>%
+  filter(POSITION <= 398) %>%
+  filter(POSITION >= 9)
+
+df3_subset <- df3 %>%
+  filter(POSITION <= 398) %>%
+  filter(POSITION >= 9)
+
+df4_subset <- df4 %>%
+  filter(POSITION <= 398) %>%
+  filter(POSITION >= 9)
+
+# Check which sample set has the most unique codons (aka: rows)
+print(dim(df1_subset))
+print(dim(df2_subset))
+print(dim(df3_subset))
+print(dim(df4_subset))
+
+# Adding column name identifiers to prepare for a dataset merge
+colnames(df1_subset) <- paste(colnames(df1_subset), "df1", sep = "_")
+colnames(df2_subset) <- paste(colnames(df2_subset), "df2", sep = "_")
+colnames(df3_subset) <- paste(colnames(df3_subset), "df3", sep = "_")
+colnames(df4_subset) <- paste(colnames(df4_subset), "df4", sep = "_")
+
+# Renaming MERGE_df# column name to be merge-able across all data sets in the sheet via same column name
+colnames(df1_subset) [22] <- "MERGE"
+colnames(df2_subset) [22] <- "MERGE"
+colnames(df3_subset) [22] <- "MERGE"
+colnames(df4_subset) [22] <- "MERGE"
+
+# Create mergable field with position and corresponding amino acid (mutant and REF) to remove codon redundancy
+df1_subset$MERGE_AA <- paste(df1_subset$POSITION_df1, df1_subset$AA_df1)
+df2_subset$MERGE_AA <- paste(df2_subset$POSITION_df2, df2_subset$AA_df2)
+df3_subset$MERGE_AA <- paste(df3_subset$POSITION_df3, df3_subset$AA_df3)
+df4_subset$MERGE_AA <- paste(df4_subset$POSITION_df4, df4_subset$AA_df4)
+
+# Count and quality filtering
+filtered_df1 <- df1_subset %>%
+  filter(CNT_df1 > 100) %>%
+  filter(FWD_MEAN_MIN_QUAL_df1 >= 24) %>%
+  filter(REV_MEAN_MIN_QUAL_df1 >= 24)
+
+filtered_df2 <- df2_subset %>%
+  filter(CNT_df2 > 100) %>%
+  filter(FWD_MEAN_MIN_QUAL_df2 >= 24) %>%
+  filter(REV_MEAN_MIN_QUAL_df2 >= 24)
+
+filtered_df3 <- df3_subset %>%
+  filter(CNT_df3 > 100) %>%
+  filter(FWD_MEAN_MIN_QUAL_df3 >= 24) %>%
+  filter(REV_MEAN_MIN_QUAL_df3 >= 24)
+
+filtered_df4 <- df4_subset %>%
+  filter(CNT_df4 > 100) %>%
+  filter(FWD_MEAN_MIN_QUAL_df4 >= 24) %>%
+  filter(REV_MEAN_MIN_QUAL_df4 >= 24)
+
+# Calculate ndet per position with filtering metrics applied
+filtered_df1 <- filtered_df1 %>%
+  group_by(POSITION_df1) %>%
+  mutate(ndet = length(unique(MERGE_AA)))
+
+filtered_df2 <- filtered_df2 %>%
+  group_by(POSITION_df2) %>%
+  mutate(ndet = length(unique(MERGE_AA)))
+
+filtered_df3 <- filtered_df3 %>%
+  group_by(POSITION_df3) %>%
+  mutate(ndet = length(unique(MERGE_AA)))
+
+filtered_df4 <- filtered_df4 %>%
+  group_by(POSITION_df4) %>%
+  mutate(ndet = length(unique(MERGE_AA)))
+
+# Determination of avg. # of AAs per position based on filtering including WT
+print(mean(filtered_df1$ndet))
+print(mean(filtered_df2$ndet))
+print(mean(filtered_df3$ndet))
+print(mean(filtered_df4$ndet))
+
+# Adjusting the POSITION field
+filtered_df1 <- filtered_df1 %>%
+  mutate(POSITION = POSITION_df1 - 8)
+
+filtered_df2<- filtered_df2 %>%
+  mutate(POSITION = POSITION_df2 - 8)
+
+filtered_df3 <- filtered_df3 %>%
+  mutate(POSITION = POSITION_df3 - 8)
+
+filtered_df4 <- filtered_df4 %>%
+  mutate(POSITION = POSITION_df4 - 8)
+
+# Add MERGE_FRAC for megalogo
+filtered_df1$MERGE_FRAC <- 1/filtered_df1$ndet
+filtered_df2$MERGE_FRAC <- 1/filtered_df2$ndet
+filtered_df3$MERGE_FRAC <- 1/filtered_df3$ndet
+filtered_df4$MERGE_FRAC <- 1/filtered_df4$ndet
+
+# Write to CSV
+write.csv(filtered_df1, "./ndet/df1_ndet.csv", row.names = FALSE)
+write.csv(filtered_df2, "./ndet/df2_ndet.csv", row.names = FALSE)
+write.csv(filtered_df3, "./ndet/df3_ndet.csv", row.names = FALSE)
+write.csv(filtered_df4, "./ndet/df4_ndet.csv", row.names = FALSE)
+
+# Remove duplicate MERGE_AA rows for the purpose of megalogo plotting, keeping highest CNT row
+filtered_df1_mega <- filtered_df1 %>%
+  group_by(MERGE_AA) %>%
+  slice_max(order_by = CNT_df1, with_ties = FALSE) %>%
+  ungroup()
+
+filtered_df2_mega <- filtered_df2 %>%
+  group_by(MERGE_AA) %>%
+  slice_max(order_by = CNT_df2, with_ties = FALSE) %>%
+  ungroup()
+
+filtered_df3_mega <- filtered_df3 %>%
+  group_by(MERGE_AA) %>%
+  slice_max(order_by = CNT_df3, with_ties = FALSE) %>%
+  ungroup()
+
+filtered_df4_mega <- filtered_df4 %>%
+  group_by(MERGE_AA) %>%
+  slice_max(order_by = CNT_df4, with_ties = FALSE) %>%
+  ungroup()
+
+
+# Rename POSITION_df# column
+filtered_df1_mega <- filtered_df1_mega %>%
+  rename(POSITION_p62 = POSITION)
+
+filtered_df2_mega <- filtered_df2_mega %>%
+  rename(POSITION_p62 = POSITION)
+
+filtered_df3_mega <- filtered_df3_mega %>%
+  rename(POSITION_p62 = POSITION)
+
+filtered_df4_mega <- filtered_df4_mega %>%
+  rename(POSITION_p62 = POSITION)
+
+# Remove suffixes for megalogo
+names(filtered_df1_mega) <- gsub("_df1$", "", names(filtered_df1_mega))
+names(filtered_df2_mega) <- gsub("_df2$", "", names(filtered_df2_mega))
+names(filtered_df3_mega) <- gsub("_df3$", "", names(filtered_df3_mega))
+names(filtered_df4_mega) <- gsub("_df4$", "", names(filtered_df4_mega))
+
+# Confirm removal was successful
+colnames(filtered_df1_mega)
+colnames(filtered_df2_mega)
+colnames(filtered_df3_mega)
+colnames(filtered_df4_mega)
+colnames(filtered_df4_mega)
+
+# Sort on position
+filtered_df1_mega <- filtered_df1_mega[order(filtered_df1_mega$POSITION_p62), ]
+filtered_df2_mega <- filtered_df2_mega[order(filtered_df2_mega$POSITION_p62), ]
+filtered_df3_mega <- filtered_df3_mega[order(filtered_df3_mega$POSITION_p62), ]
+filtered_df4_mega <- filtered_df4_mega[order(filtered_df4_mega$POSITION_p62), ]
+
+# Write to CSV
+write.csv(filtered_df1_mega, "./megalogo/filtered_wtDNA_mega.csv", row.names = FALSE)
+write.csv(filtered_df2_mega, "./megalogo/filtered_mutVirus_p1_mega.csv", row.names = FALSE)
+write.csv(filtered_df3_mega, "./megalogo/filtered_mutVirus_p2_mega.csv", row.names = FALSE)
+write.csv(filtered_df4_mega, "./megalogo/filtered_mutDNA_mega.csv", row.names = FALSE)
+```
+
+#### Visualization
+
+The following `R` code was used to generate line plots displaying $ndet$ diversity at each position.
+
+<details>
+<summary>Expand to View Code Block</summary>
+
+```{.R filename="step3b_diversity_lineplots.R"}
+#!/usr/bin/Rscript
+
+# GOAL: Generate diversity line plots for each virus library iteration
+# Packages to load
+library(ggplot2)
+library(reshape2)
+library(ggprism)
+library(gridExtra)
+library(grid)
+
+# Read back in filtered CSV files
+filtered_df1_mega <- read.csv("./megalogo/filtered_wtDNA_mega.csv")
+filtered_df2_mega <- read.csv("./megalogo/filtered_mutVirus_p1_mega.csv")
+filtered_df3_mega <- read.csv("./megalogo/filtered_mutVirus_p2_mega.csv")
+filtered_df4_mega <- read.csv("./megalogo/filtered_mutDNA_mega.csv")
+
+# Plotting 'ndet' for each position for all virus library iterations
+wt <- ggplot(filtered_df1_mega, aes(POSITION_p62, ndet)) +
+  geom_line(color = "#FC5F60") +
+  xlim(0,400) +
+  ylim(0,21) +
+  ggtitle("wtDNA") +
+  theme_prism(base_size = 11, base_line_size = 0.5) + 
+  labs(x = "Position", y = "AA detected per pos. (ndet)") + 
+  theme(axis.title.y = element_text(size = 11))
+
+mutVirusp1 <- ggplot(filtered_df2_mega, aes(POSITION_p62, ndet)) +
+  geom_line(color = "#B44385") +
+  xlim(0,400) +
+  ylim(0,21) +
+  ggtitle("mutVirus.p1") +
+  scale_color_prism() +
+  theme_prism(base_size = 11, base_line_size = 0.5) + 
+  labs(x = "Position", y = "AA detected per pos. (ndet)") + 
+  theme(axis.title.y = element_text(size = 11))
+
+mutVirusp2 <- ggplot(filtered_df3_mega, aes(POSITION_p62, ndet)) +
+  geom_line(color = "#164A62") +
+  xlim(0,400) +
+  ylim(0,21) +
+  ggtitle("mutVirus.p2") +
+  theme_prism(base_size = 11, base_line_size = 0.5) + 
+  labs(x = "Position", y = "AA detected per pos. (ndet)") + 
+  theme(axis.title.y = element_text(size = 11))
+
+mutDNA <- ggplot(filtered_df4_mega, aes(POSITION_p62, ndet)) +
+  geom_line(color = "#5D578F") +
+  xlim(0,400) +
+  ylim(0,21) +
+  ggtitle("mutDNA") +
+  theme_prism(base_size = 11, base_line_size = 0.5) + 
+  labs(x = "Position", y = "AA detected per pos. (ndet)") + 
+  theme(axis.title.y = element_text(size = 11))
+
+# Print and save each 'ndet' plot
+print(wt)
+ggsave("./ndet/wtDNA.png", plot = wt, device = "png", height = 4)
+
+print(mutDNA)
+ggsave("./ndet/mutDNA.png", plot = mutDNA, device = "png", height = 4)
+
+print(mutVirusp1)
+ggsave("./ndet/mutVirusp1.png", plot = mutVirusp1, device = "png", height = 4)
+
+print(mutVirusp2)
+ggsave("./ndet/mutVirusp2.png", plot = mutVirusp2, device = "png", height = 4)
+
+# Combine into a grid plot
+grid <- grid.arrange(wt, mutVirusp1, mutVirusp2, mutDNA, ncol = 2, top = textGrob("Unique AA per codon position", gp = gpar(fontsize = 14, fontface = "bold")))
+grid
+
+# Export grid plot at given dpi and picture format
+ggsave("./ndet/gridplot.png", plot = grid, device = "png", dpi = 1200, width = 14, height = 10)
+```
+</details>
+
+:::{#fig-lineplots layout="[[100], [33,33,33]]"}
+![mutVirus.p2](./figures/lineplots/mutVirusp2.png){#fig-mutVirusp2 width="75%"}
+
+![mutDNA](./figures/lineplots/mutDNA.png){#fig-mutDNA}
+
+![mutVirus.p1](./figures/lineplots/mutVirusp1.png){#fig-mutVirusp1}
+
+![wtDNA](./figures/lineplots/wtDNA.png){#fig-wtDNA}
+
+$ndet$ Lineplots
+:::
+
+#### mutDNA Replicate Comparison
+
+An independent replicate of the mutDNA plasmid library was generated to check the rigor of the library mutagenesis. To compare the mutagenesis efficiency of replicate 1 and replicate 2, the following `R` analyses were performed.
+
+<details>
+<summary>Expand to View Code Block</summary>
+
+```{.r filename="library_correlates.R"}
+#!/usr/bin/Rscript
+
+# GOAL: Generate comparison plots for virus library replicates
+# Packages to load
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(reshape2)
+library(ggprism)
+library(gridExtra)
+library(grid)
+library(cowplot)
+
+# Read in CSV file from VirVarSeq for rep2
+df5 <- read.csv("mutDNA/mutDNA_r2_standard_prep_seed10252022_subSampled_25000000.Q.10.csv")
+
+# Merge position and AA into single field
+df5$MERGE <- paste(df5$POSITION, df5$CODON)
+
+# Subset out only the mutated regions
+df5_subset <- df5 %>%
+  filter(POSITION <= 398) %>%
+  filter(POSITION >= 9)
+
+# Create mergable field on AA in adition to codon
+df5_subset$MERGE_AA <- paste(df5_subset$POSITION, df5_subset$AA)
+
+# Count and quality filtering
+filtered_df5 <- df5_subset %>%
+  filter(CNT > 100) %>%
+  filter(FWD_MEAN_MIN_QUAL >= 24) %>%
+  filter(REV_MEAN_MIN_QUAL >= 24)
+
+# Calculate ndet per position after filtering
+filtered_df5 <- filtered_df5 %>%
+  group_by(POSITION) %>%
+  mutate(ndet = length(unique(MERGE_AA)))
+
+# Determine avg. # of AAs per position based on filtering
+print(mean(filtered_df5$ndet))
+
+# Adjust the POSITION field
+filtered_df5 <- filtered_df5 %>%
+  mutate(POSITION_p62 = POSITION - 8)
+
+# Add MERGE_FRAC for megalogo
+filtered_df5$MERGE_FRAC <- 1 / filtered_df5$ndet
+
+# Write to CSV
+write.csv(filtered_df5, "ndet/df5_ndet.csv", row.names = FALSE)
+
+# Remove duplicate MERGE_AA rows for megalogo plotting purposes
+filtered_df5_mega <- filtered_df5 %>%
+  group_by(MERGE_AA) %>%
+  slice_max(order_by = CNT, with_ties = FALSE) %>%
+  ungroup()
+
+# Sort on position
+filtered_df5_mega <- filtered_df5_mega[order(filtered_df5_mega$POSITION_p62), ]
+
+# Write to CSV
+write.csv(filtered_df5_mega, "./megalogo/filtered_df5_mega.csv", row.names = FALSE)
+
+# Plotting 'ndet' for each position for library rep2
+mutDNA <- ggplot(filtered_df4_mega, aes(POSITION_p62, ndet)) +
+  geom_line(color = "#5D578F") +
+  xlim(0,400) +
+  ylim(0,21) +
+  ggtitle("mutDNA") +
+  theme_prism(base_size = 11, base_line_size = 0.5) + 
+  labs(x = "Position", y = "AA detected per pos. (ndet)") + 
+  theme(axis.title.y = element_text(size = 11))
+
+print(plot5)
+ggsave("ndet/df5.png", plot = plot5, device = "png", height = 4)
+
+# Subset dataframes of mutDNA rep1 (df3 from previous code block) and rep2
+filtered_df3_subset <- filtered_df3 %>% 
+  select(SAMPLE, POSITION, POSITION_p62, REF_CODON, REF_AA, ndet) %>%
+  unique()
+
+filtered_df5_subset <- filtered_df5 %>% 
+  select(SAMPLE, POSITION, POSITION_p62, REF_CODON, REF_AA, ndet) %>%
+  unique()
+
+# Add column suffixes for merging
+colnames(filtered_df3_subset) <- paste(colnames(filtered_df3_subset), "df3", sep = "_")
+
+colnames(filtered_df5_subset) <- paste(colnames(filtered_df5_subset), "df5", sep = "_")
+
+# Merge data frames
+combined_wide_abb <- bind_cols(filtered_df3_subset, filtered_df5_subset)
+
+# Calculate differences in ndet for each position of rep1 (df3) and rep2 (df5)
+combined_wide_abb$residual <- combined_wide_abb$ndet_df3 - combined_wide_abb$ndet_df5
+
+
+combined_wide_abb <- combined_wide_abb %>%
+  mutate(residual_sample = case_when(
+    residual > 0  ~ "rep1",
+    residual < 0  ~ "rep2",
+    residual == 0 ~ NA
+  ))
+
+combined_wide_abb <- combined_wide_abb %>%
+  mutate_at(c('residual'), ~na_if(., 0))
+
+# Remove suffixes for long df
+names(filtered_df3_subset) <- gsub("_df3$", "", names(filtered_df3_subset))
+names(filtered_df5_subset) <- gsub("_df5$", "", names(filtered_df5_subset))
+
+combined_long_abb <- bind_rows(filtered_df3_subset, filtered_df5_subset)
+
+
+# Plot overlapping lineplot of rep1 and rep2
+lineplot <- ggplot(combined_long_abb, aes(x = POSITION_p62, y = ndet, color = SAMPLE)) +
+  geom_line(alpha = 0.9, size = 0.5, linetype = "solid") +
+  scale_color_manual(values = c("#5D578F", "#0496FF"), 
+                     labels = c("rep1", "rep2"), 
+                     name = "Replicate") +
+  scale_y_continuous(limits = c(0, 21),
+                     breaks = seq(0, 20, by = 5)) +
+  scale_x_continuous(limits = c(0, 400)) +
+  labs(title = "mutDNA",
+       x = NULL,
+       y = "AA detected per pos. (ndet)") +
+  theme_prism(base_size = 12) + 
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 12),  
+        plot.title = element_text(size = 16, face = "bold"), 
+        legend.title = element_text(),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_blank())
+
+print(lineplot)
+ggsave("ndet/lineplot.png", plot = lineplot, height = 3, width = 7, dpi = 600)
+
+# Plot differences in rep1 and rep2 via positive/negative lollipop graph
+residuals <- ggplot(combined_wide_abb, aes(x = POSITION_p62_df5, y = residual, fill = residual_sample)) +
+  annotate("rect", xmin = 0, xmax = 400, ymin = 0, ymax = 10, alpha = 0.1, fill = "#5D578F") +
+  annotate("rect", xmin = 0, xmax = 400, ymin = -10, ymax = 0, alpha = 0.1, fill = "#0496FF") +
+  geom_col(aes(fill = residual_sample), width = 0.5, na.rm = TRUE) +
+  geom_point(alpha = 1, shape = 21, fill = "white", color = "#3C3C3C", size = 1, show.legend = TRUE, na.rm = TRUE) +
+  scale_y_continuous(limits = c(-10, 10),
+                     breaks = seq(-10, 10, by = 10)) +
+  scale_fill_manual(values = c("rep1" = "#5D578F", "rep2"= "#0496FF"), 
+                     labels = c("rep1" = "\U2191 rep1", "rep2" = "\U2191 rep2"), 
+                     name = "Replicate", 
+                     breaks = c("rep1", "rep2"),
+                     na.translate = FALSE) +
+  scale_color_manual(values = c("rep1" = "#5D578F", "rep2"= "#0496FF"), 
+                     labels = c("rep1" = "rep1", "rep2" = "rep2"), 
+                     name = "Replicate", 
+                     breaks = c("rep1", "rep2"),
+                     na.translate = FALSE) +
+  geom_hline(yintercept = 0) +
+  labs(title = NULL,
+       x = "Position",
+       y = "+/- (ndet)") +
+  theme_prism(base_size = 12) +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 12),  
+        plot.title = element_text(size = 16, face = "bold"), 
+        legend.title = element_text(), 
+        legend.text = element_text(family = "arial"),
+        axis.ticks = element_line()
+  )
+
+print(residuals)
+ggsave("ndet/residuals.png", plot = residuals, height = 2, width = 7)
+
+# Combine into single figure
+replicates_grid <- plot_grid(lineplot, residuals, align = "v", nrow = 2, rel_heights = c(3, 2))
+print(grid)
+
+ggsave("ndet/replicates_grid.png", plot = grid, width = 7)
+```
+
+</details>
+
+:::{#fig-replicates}
+![$ndet$ Lineplots](./figures/replicates/lineplot.png){#fig-replineplot width="75%"}
+
+![$ndet$ Residuals](./figures/replicates/residuals.png){#fig-represidual width="75%"}
+
+mutDNA Replicate Comparison of $ndet$
+:::
+
+
+### $neff$
+
+*Comparing the $ndet$ metric with a traditional DMS metric, $neff$.*
+
+#### Calculation
+
+To compare the results of our new metric, $ndet$, with a traditional metric of mutational tolerance referred to as $neff$, or number of effective AAs (also referred to as "preferences"), the following script was run to calculate the preference of mutVirus.p2 when compared with the baseline mutDNA library. 
+
+Because these samples were sequenced on different runs, each sample was independently error corrected with their run's corresponding wtDNA sequencing control.
+
+```{.bash filename="step3c_prefs.sh" .code-overflow-wrap code-line-numbers="false"}
+#!/bin/bash
+
+dms2_prefs --chartype codon_to_aa --excludestop yes --pre mutDNA_wide_sum.txt --post mutVirusp2_wide_sum.txt --name p2errorvsDNA --err wtDNA_DNArun_wide_sum.txt  wtDNA_p2run_wide_sum.txt --ncpus 4
+```
+
+#### Visualization
+
+To visually compare the $neff$ metric for mutVirus.p2 with the corresponding $ndet$ lineplot, the following R script was run.
+
+<details>
+<summary>Expand to View Code Block</summary>
+
+```{.r filename="neff_comparison.R"}
+#!/usr/bin/Rscript
+
+# GOAL: To plot neff for mutVirus.p2 over mutDNA (minus wtDNA) for comparison with the corresponding ndet plot.
+# Packages to load
+library(ggplot2)
+
+# Load in prefs file from dms_tools2 
+prefs <- read.csv("~/p2vsDNAerror_prefs_entropy.csv")
+
+# Plot lineplot using ggplot2
+lineplot_neff <- ggplot(prefs, aes(x = POSITION, y = neff)) +
+  geom_line(color = "red") + 
+  xlim(0,400) +
+  ylim(0,21) +
+  ggtitle("mutVirus.p2") +
+  theme_prism(base_size = 11, base_line_size = 0.5) + 
+  labs(x = "Position", 
+       y = "AA effective per pos. (neff)") + 
+  theme(axis.title.y = element_text(size = 11))
+
+print(lineplot_neff)
+
+ggsave("neff.png", plot = lineplot_neff, device = "png", height = 3, width = 5, dpi = 600)
+```
+
+</details>
+
+:::{fig-neff}
+![mutVirus.p2 ($neff$)](./figures/lineplots/neff.png){#fig-neff width="75%"}
+:::
+
+
+### `megalogo`
+
+*Creating logoplots to visualize per-position amino acid diversity.*
+
+#### $\text{MERGE\_FRAC}$ Calculation
+
+See [`step3_diversity_analysis.R`](#calculation) code block lines 128-132 for calculation of $\text{MERGE\_FRAC}$ to pass to the `megalogo` software.
+
+In brief, the math is as follows: 
+
+$$F_{site} = \frac{1}{ndet}$$
+
+For plotting the filtered residues into logoplots, each position stack was set to total a value of 1.0 and the height of the AA ($F_{site}$) is inversely proportional to the number of total AAs ($ndet$) at the site. Thus, the size of each residue does not indicate the relative frequencies of these amino acids in the virus library but rather the mutational tolerance at that codon position.
+
+#### Visualization
+
+To generate logoplots, we developed software, `megalogo`, to visualize the $ndet$ metric with customizable line breaks, annotatable domain labels and WT residues, as well as logical tick break intervals. The code to execute the logoplots for this manuscript can be found below.
+
+<details>
+<summary>Expand to View Code Block</summary>
+
+```{.bash filename="step4_megalogo_lib_characterization.sh"}
+#!/bin/bash
+
+python3 megalogo.py --input ./06132023/dedup_logo_files/wtDNA_filtered_df1_dedup.csv --sampleName wtDNA --annotConfig ../ref/annotations_config.csv --refAA ../ref/wildtype.csv --codonStartPos 1 --output ./06132023/dedup_logo_files/output/wtDNA.png 
+
+python3 megalogo.py --input ./06132023/dedup_logo_files/mutDNA_filtered_df4_dedup.csv --sampleName mutDNA --annotConfig ../ref/annotations_config.csv --refAA ../ref/wildtype.csv --codonStartPos 1 --output ./06132023/dedup_logo_files/output/mutDNA.png 
+
+python3 megalogo.py --input ./06132023/dedup_logo_files/mutVirusp1_filtered_df2_dedup.csv --sampleName mutVirus.p1 --annotConfig ../ref/annotations_config.csv --refAA ../ref/wildtype.csv --codonStartPos 1 --output ./06132023/dedup_logo_files/output/mutVirusp1.png 
+
+python3 megalogo.py --input ./06132023/dedup_logo_files/mutVirusp2_filtered_df3_dedup.csv --sampleName mutVirus.p2 --annotConfig ../ref/annotations_config.csv --refAA ../ref/wildtype.csv --codonStartPos 1 --output ./06132023/dedup_logo_files/output/mutVirusp2.png 
+```
+
+</details>
+
+:::{#fig-megalogos layout="[[100], [33,33,33]]"}
+![mutVirus.p2](./figures/megalogos/mutVirusp2_small.jpg){#fig-mutVirusp2}
+
+![mutDNA](./figures/megalogos/mutDNA_small.jpg){#fig-mutDNA}
+
+![mutVirus.p1](./figures/megalogos/mutVirusp1_small.jpg){#fig-mutVirusp1}
+
+![wtDNA](./figures/megalogos/wtDNA_small.jpg){#fig-wtDNA}
+
+$ndet$ Logoplots
+:::
+
+
+### `batchdiffsel`
+
+*Calculating differential selection for monoclonal antibody escape assays.*
+
+#### Formatting
+
+Because the output format for `VirVarSeq` does not meet the requirements to calculate differential selection, in-house `R` code (below) was utilized to format per the `dms_tools2` requirements.
+
+::: {.callout-warning}
+The code process below is heavily `R` dependent and not well suited for large batches of samples. Moving forward, pipeline will be converted to a loop-based algorithm and executed with remote compute nodes.
+:::
+
+<details>
+<summary>Expand to View Code Block</summary>
+
+```{.R filename="step5_dmstools_prep.R"}
+#!/usr/bin/Rscript
+
+# GOAL: To reformat the VirVarSeq output for differential selection calculation per dms_tools2 formatting requirements.
+# Packages to load
+library(plyr)
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+library(tidyr)
+library(stringr)
+
+# Set working directory to find VirVarSeq output matrices
+setwd("./08012023/VirVarSeq/results/mixture_model/diffsel")
+
+# List file names but then need to open in excel and save as .csv file
+# List.files(path = ".", pattern = ".Q.10.codon")
+
+# Confirm all files successfully converted to .csv
+list.files(path = ".", pattern = ".Q.10.csv")
+
+# Read in .csv files from VirVarSeq
+df1 <- read.csv("wtDNA_seed08122023_subsampled_25000000.Q.10.csv")
+df2 <- read.csv("mutVirus_p2_seed06212023_subsampled_25000000.Q.10.csv")
+df3 <- read.csv("mutVirus_CHK11_1_1_seed08122023_subsampled_25000000.Q.10.csv")
+df4 <- read.csv("mutVirus_CHK11_3_1_seed08122023_subsampled_25000000.Q.10.csv")
+df5 <- read.csv("mutVirus_CHK152_1_2_seed08122023_subsampled_25000000.Q.10.csv")
+df6 <- read.csv("mutVirus_CHK152_2_1_seed08122023_subsampled_25000000.Q.10.csv")
+df7 <- read.csv("mutVirus_CHK265_1_2_seed08122023_subsampled_25000000.Q.10.csv")
+df8 <- read.csv("mutVirus_CHK265_2_3_seed08122023_subsampled_25000000.Q.10.csv")
+df9 <- read.csv("mutVirus_only_1_2_seed08122023_subsampled_25000000.Q.10.csv")
+df10 <- read.csv("mutVirus_only_2_1_seed08122023_subsampled_25000000.Q.10.csv")
+
+# Merge position and AA into single field in order to be able to sort/combine/melt/etc.
+df1$MERGE <- paste(df1$POSITION, df1$AA)
+df2$MERGE <- paste(df2$POSITION, df2$AA)
+df3$MERGE <- paste(df3$POSITION, df3$AA)
+df4$MERGE <- paste(df4$POSITION, df4$AA)
+df5$MERGE <- paste(df5$POSITION, df5$AA)
+df6$MERGE <- paste(df6$POSITION, df6$AA)
+df7$MERGE <- paste(df7$POSITION, df7$AA)
+df8$MERGE <- paste(df8$POSITION, df8$AA)
+df9$MERGE <- paste(df9$POSITION, df9$AA)
+df10$MERGE <- paste(df10$POSITION, df10$AA)
+
+# Subset out only the mutated regions
+df1_subset <- df1 %>%
+  filter(POSITION <= 398) %>%
+  filter(POSITION >= 9)
+
+df2_subset <- df2 %>%
+  filter(POSITION <= 398) %>%
+  filter(POSITION >= 9)
+
+df3_subset <- df3 %>%
+  filter(POSITION <= 398) %>%
+  filter(POSITION >= 9)
+
+df4_subset <- df4 %>%
+  filter(POSITION <= 398) %>%
+  filter(POSITION >= 9)
+
+df5_subset <- df5 %>%
+  filter(POSITION <= 398) %>%
+  filter(POSITION >= 9)
+
+df6_subset <- df6 %>%
+  filter(POSITION <= 398) %>%
+  filter(POSITION >= 9)
+
+df7_subset <- df7 %>%
+  filter(POSITION <= 398) %>%
+  filter(POSITION >= 9)
+
+df8_subset <- df8 %>%
+  filter(POSITION <= 398) %>%
+  filter(POSITION >= 9)
+
+df9_subset <- df9 %>%
+  filter(POSITION <= 398) %>%
+  filter(POSITION >= 9)
+
+df10_subset <- df10 %>%
+  filter(POSITION <= 398) %>%
+  filter(POSITION >= 9)
+
+# Calculate the total reads for each amino acid, not codon, per position
+df1_subset_sum <- df1_subset %>%
+  group_by(MERGE) %>%
+  summarise(SUM = sum(CNT))
+
+df2_subset_sum <- df2_subset %>%
+  group_by(MERGE) %>%
+  summarise(SUM = sum(CNT))
+
+df3_subset_sum <- df3_subset %>%
+  group_by(MERGE) %>%
+  summarise(SUM = sum(CNT))
+
+df4_subset_sum <- df4_subset %>%
+  group_by(MERGE) %>%
+  summarise(SUM = sum(CNT))
+
+df5_subset_sum <- df5_subset %>%
+  group_by(MERGE) %>%
+  summarise(SUM = sum(CNT))
+
+df6_subset_sum <- df6_subset %>%
+  group_by(MERGE) %>%
+  summarise(SUM = sum(CNT))
+
+df7_subset_sum <- df7_subset %>%
+  group_by(MERGE) %>%
+  summarise(SUM = sum(CNT))
+
+df8_subset_sum <- df8_subset %>%
+  group_by(MERGE) %>%
+  summarise(SUM = sum(CNT))
+
+df9_subset_sum <- df9_subset %>%
+  group_by(MERGE) %>%
+  summarise(SUM = sum(CNT))
+
+df10_subset_sum <- df10_subset %>%
+  group_by(MERGE) %>%
+  summarise(SUM = sum(CNT))
+
+# Combine this field with the original dataframe
+df1_subset_sum <- merge(df1_subset, df1_subset_sum, by = "MERGE", all = T)
+df2_subset_sum <- merge(df2_subset, df2_subset_sum, by = "MERGE", all = T)
+df3_subset_sum <- merge(df3_subset, df3_subset_sum, by = "MERGE", all = T)
+df4_subset_sum <- merge(df4_subset, df4_subset_sum, by = "MERGE", all = T)
+df5_subset_sum <- merge(df5_subset, df5_subset_sum, by = "MERGE", all = T)
+df6_subset_sum <- merge(df6_subset, df6_subset_sum, by = "MERGE", all = T)
+df7_subset_sum <- merge(df7_subset, df7_subset_sum, by = "MERGE", all = T)
+df8_subset_sum <- merge(df8_subset, df8_subset_sum, by = "MERGE", all = T)
+df9_subset_sum <- merge(df9_subset, df9_subset_sum, by = "MERGE", all = T)
+df10_subset_sum <- merge(df10_subset, df10_subset_sum, by = "MERGE", all = T)
+
+# Filter based on TB filter requirements
+filtered_df1_subset_sum <- df1_subset_sum %>%
+  filter(CNT > 100) %>%
+  filter(FWD_MEAN_MIN_QUAL >= 24) %>%
+  filter(REV_MEAN_MIN_QUAL >= 24)
+
+filtered_df2_subset_sum <- df2_subset_sum %>%
+  filter(CNT > 100) %>%
+  filter(FWD_MEAN_MIN_QUAL >= 24) %>%
+  filter(REV_MEAN_MIN_QUAL >= 24)
+
+filtered_df3_subset_sum <- df3_subset_sum %>%
+  filter(CNT > 100) %>%
+  filter(FWD_MEAN_MIN_QUAL >= 24) %>%
+  filter(REV_MEAN_MIN_QUAL >= 24)
+
+filtered_df4_subset_sum <- df4_subset_sum %>%
+  filter(CNT > 100) %>%
+  filter(FWD_MEAN_MIN_QUAL >= 24) %>%
+  filter(REV_MEAN_MIN_QUAL >= 24)
+
+filtered_df5_subset_sum <- df5_subset_sum %>%
+  filter(CNT > 100) %>%
+  filter(FWD_MEAN_MIN_QUAL >= 24) %>%
+  filter(REV_MEAN_MIN_QUAL >= 24)
+
+filtered_df6_subset_sum <- df6_subset_sum %>%
+  filter(CNT > 100) %>%
+  filter(FWD_MEAN_MIN_QUAL >= 24) %>%
+  filter(REV_MEAN_MIN_QUAL >= 24)
+
+filtered_df7_subset_sum <- df7_subset_sum %>%
+  filter(CNT > 100) %>%
+  filter(FWD_MEAN_MIN_QUAL >= 24) %>%
+  filter(REV_MEAN_MIN_QUAL >= 24)
+
+filtered_df8_subset_sum <- df8_subset_sum %>%
+  filter(CNT > 100) %>%
+  filter(FWD_MEAN_MIN_QUAL >= 24) %>%
+  filter(REV_MEAN_MIN_QUAL >= 24)
+
+filtered_df9_subset_sum <- df9_subset_sum %>%
+  filter(CNT > 100) %>%
+  filter(FWD_MEAN_MIN_QUAL >= 24) %>%
+  filter(REV_MEAN_MIN_QUAL >= 24)
+
+filtered_df10_subset_sum <- df10_subset_sum %>%
+  filter(CNT > 100) %>%
+  filter(FWD_MEAN_MIN_QUAL >= 24) %>%
+  filter(REV_MEAN_MIN_QUAL >= 24)
+
+# Calculate the per amino acid position mutational frequency (not codon)
+filtered_df1_subset_sum$grouped_freq <- filtered_df1_subset_sum$SUM/filtered_df1_subset_sum$DENOM
+filtered_df2_subset_sum$grouped_freq <- filtered_df2_subset_sum$SUM/filtered_df2_subset_sum$DENOM
+filtered_df3_subset_sum$grouped_freq <- filtered_df3_subset_sum$SUM/filtered_df3_subset_sum$DENOM
+filtered_df4_subset_sum$grouped_freq <- filtered_df4_subset_sum$SUM/filtered_df4_subset_sum$DENOM
+filtered_df5_subset_sum$grouped_freq <- filtered_df5_subset_sum$SUM/filtered_df5_subset_sum$DENOM
+filtered_df6_subset_sum$grouped_freq <- filtered_df6_subset_sum$SUM/filtered_df6_subset_sum$DENOM
+filtered_df7_subset_sum$grouped_freq <- filtered_df7_subset_sum$SUM/filtered_df7_subset_sum$DENOM
+filtered_df8_subset_sum$grouped_freq <- filtered_df8_subset_sum$SUM/filtered_df8_subset_sum$DENOM
+filtered_df9_subset_sum$grouped_freq <- filtered_df9_subset_sum$SUM/filtered_df9_subset_sum$DENOM
+filtered_df10_subset_sum$grouped_freq <- filtered_df10_subset_sum$SUM/filtered_df10_subset_sum$DENOM
+
+
+# Subset out only the relevant fields to prepare for dms_tools2
+df1deduplicated <- filtered_df1_subset_sum[,c("POSITION", "REF_CODON", "CODON", "CNT")]
+df2deduplicated <- filtered_df2_subset_sum[,c("POSITION", "REF_CODON", "CODON", "CNT")]
+df3deduplicated <- filtered_df3_subset_sum[,c("POSITION", "REF_CODON", "CODON", "CNT")]
+df4deduplicated <- filtered_df4_subset_sum[,c("POSITION", "REF_CODON", "CODON", "CNT")]
+df5deduplicated <- filtered_df5_subset_sum[,c("POSITION", "REF_CODON", "CODON", "CNT")]
+df6deduplicated <- filtered_df6_subset_sum[,c("POSITION", "REF_CODON", "CODON", "CNT")]
+df7deduplicated <- filtered_df7_subset_sum[,c("POSITION", "REF_CODON", "CODON", "CNT")]
+df8deduplicated <- filtered_df8_subset_sum[,c("POSITION", "REF_CODON", "CODON", "CNT")]
+df9deduplicated <- filtered_df9_subset_sum[,c("POSITION", "REF_CODON", "CODON", "CNT")]
+df10deduplicated <- filtered_df10_subset_sum[,c("POSITION", "REF_CODON", "CODON", "CNT")]
+
+# Subset only the distinct (deduplicated) rows
+df1deduplicated <- distinct(df1deduplicated)
+df2deduplicated <- distinct(df2deduplicated)
+df3deduplicated <- distinct(df3deduplicated)
+df4deduplicated <- distinct(df4deduplicated)
+df5deduplicated <- distinct(df5deduplicated)
+df6deduplicated <- distinct(df6deduplicated)
+df7deduplicated <- distinct(df7deduplicated)
+df8deduplicated <- distinct(df8deduplicated)
+df9deduplicated <- distinct(df9deduplicated)
+df10deduplicated <- distinct(df10deduplicated)
+
+# Write to csv in current working directory)
+write.csv(df1deduplicated, "df1_deduplicated.csv")
+write.csv(df2deduplicated, "df2_deduplicated.csv")
+write.csv(df3deduplicated, "df3_deduplicated.csv")
+write.csv(df4deduplicated, "df4_deduplicated.csv")
+write.csv(df5deduplicated, "df5_deduplicated.csv")
+write.csv(df6deduplicated, "df6_deduplicated.csv")
+write.csv(df7deduplicated, "df7_deduplicated.csv")
+write.csv(df8deduplicated, "df8_deduplicated.csv")
+write.csv(df9deduplicated, "df9_deduplicated.csv")
+write.csv(df10deduplicated, "df10_deduplicated.csv")
+
+# Convert to wide format
+df1_wide_sum <- df1deduplicated %>%
+  spread(CODON, CNT)
+df2_wide_sum <- df2deduplicated %>%
+  spread(CODON, CNT)
+df3_wide_sum <- df3deduplicated %>%
+  spread(CODON, CNT)
+df4_wide_sum <- df4deduplicated %>%
+  spread(CODON, CNT)
+df5_wide_sum <- df5deduplicated %>%
+  spread(CODON, CNT)
+df6_wide_sum <- df6deduplicated %>%
+  spread(CODON, CNT)
+df7_wide_sum <- df7deduplicated %>%
+  spread(CODON, CNT)
+df8_wide_sum <- df8deduplicated %>%
+  spread(CODON, CNT)
+df9_wide_sum <- df9deduplicated %>%
+  spread(CODON, CNT)
+df10_wide_sum <- df10deduplicated %>%
+  spread(CODON, CNT)
+
+# Rename column names to be easily read by dms_tools2.prefs
+colnames(df1_wide_sum)[1] = "site"
+colnames(df2_wide_sum)[1] = "site"
+colnames(df3_wide_sum)[1] = "site"
+colnames(df4_wide_sum)[1] = "site"
+colnames(df5_wide_sum)[1] = "site"
+colnames(df6_wide_sum)[1] = "site"
+colnames(df7_wide_sum)[1] = "site"
+colnames(df8_wide_sum)[1] = "site"
+colnames(df9_wide_sum)[1] = "site"
+colnames(df10_wide_sum)[1] = "site"
+
+colnames(df1_wide_sum)[2] = "wildtype" 
+colnames(df2_wide_sum)[2] = "wildtype" 
+colnames(df3_wide_sum)[2] = "wildtype" 
+colnames(df4_wide_sum)[2] = "wildtype" 
+colnames(df5_wide_sum)[2] = "wildtype" 
+colnames(df6_wide_sum)[2] = "wildtype"
+colnames(df7_wide_sum)[2] = "wildtype" 
+colnames(df8_wide_sum)[2] = "wildtype"
+colnames(df9_wide_sum)[2] = "wildtype" 
+colnames(df10_wide_sum)[2] = "wildtype" 
+
+# Remove NAs and replace with zeros
+df1_wide_sum[is.na(df1_wide_sum)] <- 0
+df2_wide_sum[is.na(df2_wide_sum)] <- 0
+df3_wide_sum[is.na(df3_wide_sum)] <- 0
+df4_wide_sum[is.na(df4_wide_sum)] <- 0
+df5_wide_sum[is.na(df5_wide_sum)] <- 0
+df6_wide_sum[is.na(df6_wide_sum)] <- 0
+df7_wide_sum[is.na(df7_wide_sum)] <- 0
+df8_wide_sum[is.na(df8_wide_sum)] <- 0
+df9_wide_sum[is.na(df9_wide_sum)] <- 0
+df10_wide_sum[is.na(df10_wide_sum)] <- 0
+
+# Set site numbers to start at 1, not 9
+df1_wide_sum$site <- c(1:390)
+df2_wide_sum$site <- c(1:390)
+df3_wide_sum$site <- c(1:390)
+df4_wide_sum$site <- c(1:390)
+df5_wide_sum$site <- c(1:390)
+df6_wide_sum$site <- c(1:390)
+df7_wide_sum$site <- c(1:390)
+df8_wide_sum$site <- c(1:390)
+df9_wide_sum$site <- c(1:390)
+df10_wide_sum$site <- c(1:390)
+
+# Write to csv in current working directory
+write.csv(df1_wide_sum, "wtDNA_codoncounts.csv", row.names = FALSE)
+write.csv(df2_wide_sum, "mutVirus-only-old_codoncounts.csv", row.names = FALSE)
+write.csv(df3_wide_sum, "CHK-11-1_codoncounts.csv", row.names = FALSE)
+write.csv(df4_wide_sum, "CHK-11-2_codoncounts.csv", row.names = FALSE)
+write.csv(df5_wide_sum, "CHK-152-1_codoncounts.csv", row.names = FALSE)
+write.csv(df6_wide_sum, "CHK-152-2_codoncounts.csv", row.names = FALSE)
+write.csv(df7_wide_sum, "CHK-265-1_codoncounts.csv", row.names = FALSE)
+write.csv(df8_wide_sum, "CHK-265-2_codoncounts.csv", row.names = FALSE)
+write.csv(df9_wide_sum, "mutVirus-only-1_codoncounts.csv", row.names = FALSE)
+write.csv(df10_wide_sum, "mutVirus-only-2_codoncounts.csv", row.names = FALSE)
+
+# Write to txt in current working directory (actual input for dms_tools2)
+write.csv(df1_wide_sum, "wtDNA_codoncounts.txt", sep = "\t", row.names = FALSE)
+write.csv(df2_wide_sum, "mutVirus-only-old_codoncounts.txt", sep = "\t", row.names = FALSE)
+write.csv(df3_wide_sum, "CHK-11-1_codoncounts.txt", sep = "\t", row.names = FALSE)
+write.csv(df4_wide_sum, "CHK-11-2_codoncounts.txt", sep = "\t", row.names = FALSE)
+write.csv(df5_wide_sum, "CHK-152-1_codoncounts.txt", sep = "\t", row.names = FALSE)
+write.csv(df6_wide_sum, "CHK-152-2_codoncounts.txt", sep = "\t", row.names = FALSE)
+write.csv(df7_wide_sum, "CHK-265-1_codoncounts.txt", sep = "\t", row.names = FALSE)
+write.csv(df8_wide_sum, "CHK-265-2_codoncounts.txt", sep = "\t", row.names = FALSE)
+write.csv(df9_wide_sum, "mutVirus-only-1_codoncounts.txt", sep = "\t", row.names = FALSE)
+write.csv(df10_wide_sum, "mutVirus-only-2_codoncounts.txt", sep = "\t", row.names = FALSE)
+```
+</details>
+
+#### Execution
+
+```{r}
+#| echo: false
+#| label: tbl-batchfile
+#| tbl-cap: "batchfile.csv"
+library(knitr)
+batchfile <- read.csv("~/git/chikvdms-mAb-paper/docs/files/batchfile.csv")
+kable(batchfile)
+```
+
+<br>
+With the above batch file, the following code was executed to generate summary results for each replicate against all other replicates.
+
+```{.bash filename="step6_dmstools_diffsel.sh" .code-overflow-wrap code-line-numbers="false"}
+#!/bin/bash
+
+dms2_batch_diffsel --outdir output --indir ./input/ --ncpus 10 --batchfile ./input/batchfile.csv --summaryprefix summary
+```
+
+
+### `dmslogo`
+
+*Plotting sites of escape for validation experiments and previously-identified critical antibody sites.*
+
+#### Visualization
+
+<div style="display: none;">
+
+  {{< embed dmslogo.ipynb >}}
+
+</div>
+
+<details>
+<summary>Expand to View Code Blocks</summary>
+
+<br>
+
+##### Import Packages {.unnumbered}
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+# Logoplot Generation
+import os
+import random
+
+from IPython.display import display, Image
+
+import matplotlib.pyplot as plt
+
+import numpy
+
+import pandas as pd
+
+import dmslogo
+from dmslogo.colorschemes import CBPALETTE
+```
+
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+# Set preferences for logoplot displays
+pd.set_option("display.max_columns", 20)
+pd.set_option("display.width", 500)
+```
+
+##### Import Data {.unnumbered}
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+data_chk11 = (pd.read_csv('~/dms_data/summary_CHK-11-meanmutdiffsel.csv'))
+
+data_chk11 = data_chk11.sort_values(by=['site', 'mutation'])
+
+data_chk11
+```
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>site</th>
+      <th>wildtype</th>
+      <th>mutation</th>
+      <th>mutdiffsel</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>3013</th>
+      <td>1</td>
+      <td>S</td>
+      <td>A</td>
+      <td>0.000022</td>
+    </tr>
+    <tr>
+      <th>3004</th>
+      <td>1</td>
+      <td>S</td>
+      <td>C</td>
+      <td>0.000022</td>
+    </tr>
+    <tr>
+      <th>2999</th>
+      <td>1</td>
+      <td>S</td>
+      <td>D</td>
+      <td>0.000022</td>
+    </tr>
+    <tr>
+      <th>3002</th>
+      <td>1</td>
+      <td>S</td>
+      <td>E</td>
+      <td>0.000022</td>
+    </tr>
+    <tr>
+      <th>3005</th>
+      <td>1</td>
+      <td>S</td>
+      <td>F</td>
+      <td>0.000022</td>
+    </tr>
+    <tr>
+      <th>...</th>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+    </tr>
+    <tr>
+      <th>3094</th>
+      <td>390</td>
+      <td>L</td>
+      <td>S</td>
+      <td>0.000013</td>
+    </tr>
+    <tr>
+      <th>3084</th>
+      <td>390</td>
+      <td>L</td>
+      <td>T</td>
+      <td>0.000013</td>
+    </tr>
+    <tr>
+      <th>3091</th>
+      <td>390</td>
+      <td>L</td>
+      <td>V</td>
+      <td>0.000013</td>
+    </tr>
+    <tr>
+      <th>3095</th>
+      <td>390</td>
+      <td>L</td>
+      <td>W</td>
+      <td>0.000013</td>
+    </tr>
+    <tr>
+      <th>3097</th>
+      <td>390</td>
+      <td>L</td>
+      <td>Y</td>
+      <td>0.000013</td>
+    </tr>
+  </tbody>
+</table>
+<p>7410 rows × 4 columns</p>
+</div>
+
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+data_chk152 = (pd.read_csv('~/dms_data/summary_CHK-152-meanmutdiffsel.csv'))
+
+data_chk152 = data_chk152.sort_values(by=['site', 'mutation'])
+
+data_chk152
+```
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>site</th>
+      <th>wildtype</th>
+      <th>mutation</th>
+      <th>mutdiffsel</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>3070</th>
+      <td>1</td>
+      <td>S</td>
+      <td>A</td>
+      <td>1.293007e-05</td>
+    </tr>
+    <tr>
+      <th>3069</th>
+      <td>1</td>
+      <td>S</td>
+      <td>C</td>
+      <td>1.293007e-05</td>
+    </tr>
+    <tr>
+      <th>3080</th>
+      <td>1</td>
+      <td>S</td>
+      <td>D</td>
+      <td>1.293007e-05</td>
+    </tr>
+    <tr>
+      <th>3072</th>
+      <td>1</td>
+      <td>S</td>
+      <td>E</td>
+      <td>1.293007e-05</td>
+    </tr>
+    <tr>
+      <th>3071</th>
+      <td>1</td>
+      <td>S</td>
+      <td>F</td>
+      <td>1.293007e-05</td>
+    </tr>
+    <tr>
+      <th>...</th>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+    </tr>
+    <tr>
+      <th>3361</th>
+      <td>390</td>
+      <td>L</td>
+      <td>S</td>
+      <td>1.601713e-16</td>
+    </tr>
+    <tr>
+      <th>3362</th>
+      <td>390</td>
+      <td>L</td>
+      <td>T</td>
+      <td>1.601713e-16</td>
+    </tr>
+    <tr>
+      <th>3363</th>
+      <td>390</td>
+      <td>L</td>
+      <td>V</td>
+      <td>1.601713e-16</td>
+    </tr>
+    <tr>
+      <th>3364</th>
+      <td>390</td>
+      <td>L</td>
+      <td>W</td>
+      <td>1.601713e-16</td>
+    </tr>
+    <tr>
+      <th>3347</th>
+      <td>390</td>
+      <td>L</td>
+      <td>Y</td>
+      <td>1.601713e-16</td>
+    </tr>
+  </tbody>
+</table>
+<p>7800 rows × 4 columns</p>
+</div>
+
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+data_chk265 = (pd.read_csv('~/dms_data/summary_CHK-265-meanmutdiffsel.csv'))
+
+data_chk265 = data_chk265.sort_values(by=['site', 'mutation'])
+
+data_chk265
+```
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>site</th>
+      <th>wildtype</th>
+      <th>mutation</th>
+      <th>mutdiffsel</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>3125</th>
+      <td>1</td>
+      <td>S</td>
+      <td>A</td>
+      <td>2.401568e-05</td>
+    </tr>
+    <tr>
+      <th>3124</th>
+      <td>1</td>
+      <td>S</td>
+      <td>C</td>
+      <td>2.401568e-05</td>
+    </tr>
+    <tr>
+      <th>3126</th>
+      <td>1</td>
+      <td>S</td>
+      <td>D</td>
+      <td>2.401568e-05</td>
+    </tr>
+    <tr>
+      <th>3128</th>
+      <td>1</td>
+      <td>S</td>
+      <td>E</td>
+      <td>2.401568e-05</td>
+    </tr>
+    <tr>
+      <th>3129</th>
+      <td>1</td>
+      <td>S</td>
+      <td>F</td>
+      <td>2.401568e-05</td>
+    </tr>
+    <tr>
+      <th>...</th>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+    </tr>
+    <tr>
+      <th>3637</th>
+      <td>390</td>
+      <td>L</td>
+      <td>S</td>
+      <td>-1.601713e-16</td>
+    </tr>
+    <tr>
+      <th>3639</th>
+      <td>390</td>
+      <td>L</td>
+      <td>T</td>
+      <td>-1.601713e-16</td>
+    </tr>
+    <tr>
+      <th>3640</th>
+      <td>390</td>
+      <td>L</td>
+      <td>V</td>
+      <td>-1.601713e-16</td>
+    </tr>
+    <tr>
+      <th>3641</th>
+      <td>390</td>
+      <td>L</td>
+      <td>W</td>
+      <td>-1.601713e-16</td>
+    </tr>
+    <tr>
+      <th>3636</th>
+      <td>390</td>
+      <td>L</td>
+      <td>Y</td>
+      <td>-1.601713e-16</td>
+    </tr>
+  </tbody>
+</table>
+<p>7800 rows × 4 columns</p>
+</div>
+
+
+##### Identify Sites for Plotting {.unnumbered}
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+# Just showing sites we chose to mutate (using p62 numbering)
+sites = list([40]+[49]+[139]+[143]+[243]+[283]+[305])
+sites152 = list([75]+[123]+[138]+[257]+[258]+[276]+[296]+[297]+[299])
+sites265 = list([88]+[90]+[91]+[92]+[93]+[121]+[122]+[123]+[128]+[129]+[136]+[137]+[138]+[141]+[143]+[145]+[146]+[148]+[150]+[152]+[154]+[156]+[157]+[168]+[171]+[173]+[174]+[183]+[184]+[185]+[186]+[247]+[248]+[249]+[250]+[251]+[253]+[254]+[257]+[258]+[261]+[263]+[267]+[268]+[269]+[270]+[272]+[273]+[274]+[276]+[277]+[278]+[279]+[280]+[281]+[282]+[283]+[284]+[285])
+
+# Extract those sites
+zoomed_df_11 = (data_chk11.loc[data_chk11['site'].isin(sites)]
+                )
+# Renumber based on E3/E2 numbering not p62 numbering (E3 numbering maintained, E2 changed)
+zoomed_df_11 = zoomed_df_11.replace(143, 79)
+zoomed_df_11 = zoomed_df_11.replace(305, 241)
+zoomed_df_11 = zoomed_df_11.replace(139, 75)
+zoomed_df_11 = zoomed_df_11.replace(243, 179)
+zoomed_df_11 = zoomed_df_11.replace(283, 219)
+
+# Combine new numbering with wildtype reside for label
+zoomed_df_11 = zoomed_df_11.assign(site_label = lambda x: x['wildtype'] + x['site'].astype(str))
+
+zoomed_df_11
+```
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>site</th>
+      <th>wildtype</th>
+      <th>mutation</th>
+      <th>mutdiffsel</th>
+      <th>site_label</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>6804</th>
+      <td>40</td>
+      <td>D</td>
+      <td>A</td>
+      <td>-0.657902</td>
+      <td>D40</td>
+    </tr>
+    <tr>
+      <th>126</th>
+      <td>40</td>
+      <td>D</td>
+      <td>C</td>
+      <td>2.386392</td>
+      <td>D40</td>
+    </tr>
+    <tr>
+      <th>6330</th>
+      <td>40</td>
+      <td>D</td>
+      <td>E</td>
+      <td>-0.275685</td>
+      <td>D40</td>
+    </tr>
+    <tr>
+      <th>5768</th>
+      <td>40</td>
+      <td>D</td>
+      <td>F</td>
+      <td>-0.053723</td>
+      <td>D40</td>
+    </tr>
+    <tr>
+      <th>392</th>
+      <td>40</td>
+      <td>D</td>
+      <td>G</td>
+      <td>0.457301</td>
+      <td>D40</td>
+    </tr>
+    <tr>
+      <th>...</th>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+    </tr>
+    <tr>
+      <th>6071</th>
+      <td>241</td>
+      <td>L</td>
+      <td>S</td>
+      <td>-0.160726</td>
+      <td>L241</td>
+    </tr>
+    <tr>
+      <th>6959</th>
+      <td>241</td>
+      <td>L</td>
+      <td>T</td>
+      <td>-1.025003</td>
+      <td>L241</td>
+    </tr>
+    <tr>
+      <th>6043</th>
+      <td>241</td>
+      <td>L</td>
+      <td>V</td>
+      <td>-0.152095</td>
+      <td>L241</td>
+    </tr>
+    <tr>
+      <th>6734</th>
+      <td>241</td>
+      <td>L</td>
+      <td>W</td>
+      <td>-0.573042</td>
+      <td>L241</td>
+    </tr>
+    <tr>
+      <th>1016</th>
+      <td>241</td>
+      <td>L</td>
+      <td>Y</td>
+      <td>0.123828</td>
+      <td>L241</td>
+    </tr>
+  </tbody>
+</table>
+<p>133 rows × 5 columns</p>
+</div>
+
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+zoomed_df_152 = (data_chk152.loc[data_chk152['site'].isin(sites)]
+                )
+
+zoomed_df_152 = zoomed_df_152.replace(143, 79)
+zoomed_df_152 = zoomed_df_152.replace(305, 241)
+zoomed_df_152 = zoomed_df_152.replace(139, 75)
+zoomed_df_152 = zoomed_df_152.replace(243, 179)
+zoomed_df_152 = zoomed_df_152.replace(283, 219)
+
+zoomed_df_152 = zoomed_df_152.assign(site_label = lambda x: x['wildtype'] + x['site'].astype(str))
+
+zoomed_df_152
+```
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>site</th>
+      <th>wildtype</th>
+      <th>mutation</th>
+      <th>mutdiffsel</th>
+      <th>site_label</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>6850</th>
+      <td>40</td>
+      <td>D</td>
+      <td>A</td>
+      <td>-1.234171</td>
+      <td>D40</td>
+    </tr>
+    <tr>
+      <th>4009</th>
+      <td>40</td>
+      <td>D</td>
+      <td>C</td>
+      <td>-0.000064</td>
+      <td>D40</td>
+    </tr>
+    <tr>
+      <th>7449</th>
+      <td>40</td>
+      <td>D</td>
+      <td>D</td>
+      <td>NaN</td>
+      <td>D40</td>
+    </tr>
+    <tr>
+      <th>641</th>
+      <td>40</td>
+      <td>D</td>
+      <td>E</td>
+      <td>0.344012</td>
+      <td>D40</td>
+    </tr>
+    <tr>
+      <th>7056</th>
+      <td>40</td>
+      <td>D</td>
+      <td>F</td>
+      <td>-2.412958</td>
+      <td>D40</td>
+    </tr>
+    <tr>
+      <th>...</th>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+    </tr>
+    <tr>
+      <th>7140</th>
+      <td>241</td>
+      <td>L</td>
+      <td>S</td>
+      <td>-2.794302</td>
+      <td>L241</td>
+    </tr>
+    <tr>
+      <th>6844</th>
+      <td>241</td>
+      <td>L</td>
+      <td>T</td>
+      <td>-1.191166</td>
+      <td>L241</td>
+    </tr>
+    <tr>
+      <th>498</th>
+      <td>241</td>
+      <td>L</td>
+      <td>V</td>
+      <td>0.460759</td>
+      <td>L241</td>
+    </tr>
+    <tr>
+      <th>788</th>
+      <td>241</td>
+      <td>L</td>
+      <td>W</td>
+      <td>0.257530</td>
+      <td>L241</td>
+    </tr>
+    <tr>
+      <th>751</th>
+      <td>241</td>
+      <td>L</td>
+      <td>Y</td>
+      <td>0.281082</td>
+      <td>L241</td>
+    </tr>
+  </tbody>
+</table>
+<p>140 rows × 5 columns</p>
+</div>
+
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+contacts_df_152 = (data_chk152.loc[data_chk152['site'].isin(sites152)]
+                )
+
+contacts_df_152 = contacts_df_152.replace(75, 11)
+contacts_df_152 = contacts_df_152.replace(123, 59)
+contacts_df_152 = contacts_df_152.replace(138, 74)
+contacts_df_152 = contacts_df_152.replace(257, 193)
+contacts_df_152 = contacts_df_152.replace(258, 194)
+contacts_df_152 = contacts_df_152.replace(276, 212)
+contacts_df_152 = contacts_df_152.replace(296, 232)
+contacts_df_152 = contacts_df_152.replace(299, 235)
+contacts_df_152 = contacts_df_152.replace(297, 233)
+
+contacts_df_152 = contacts_df_152.assign(site_label = lambda x: x['wildtype'] + x['site'].astype(str))
+
+contacts_df_152
+```
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>site</th>
+      <th>wildtype</th>
+      <th>mutation</th>
+      <th>mutdiffsel</th>
+      <th>site_label</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>7484</th>
+      <td>11</td>
+      <td>A</td>
+      <td>A</td>
+      <td>NaN</td>
+      <td>A11</td>
+    </tr>
+    <tr>
+      <th>1719</th>
+      <td>11</td>
+      <td>A</td>
+      <td>C</td>
+      <td>0.000583</td>
+      <td>A11</td>
+    </tr>
+    <tr>
+      <th>1720</th>
+      <td>11</td>
+      <td>A</td>
+      <td>D</td>
+      <td>0.000583</td>
+      <td>A11</td>
+    </tr>
+    <tr>
+      <th>1727</th>
+      <td>11</td>
+      <td>A</td>
+      <td>E</td>
+      <td>0.000583</td>
+      <td>A11</td>
+    </tr>
+    <tr>
+      <th>1717</th>
+      <td>11</td>
+      <td>A</td>
+      <td>F</td>
+      <td>0.000583</td>
+      <td>A11</td>
+    </tr>
+    <tr>
+      <th>...</th>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+    </tr>
+    <tr>
+      <th>3143</th>
+      <td>235</td>
+      <td>W</td>
+      <td>S</td>
+      <td>0.000007</td>
+      <td>W235</td>
+    </tr>
+    <tr>
+      <th>3144</th>
+      <td>235</td>
+      <td>W</td>
+      <td>T</td>
+      <td>0.000007</td>
+      <td>W235</td>
+    </tr>
+    <tr>
+      <th>3145</th>
+      <td>235</td>
+      <td>W</td>
+      <td>V</td>
+      <td>0.000007</td>
+      <td>W235</td>
+    </tr>
+    <tr>
+      <th>7708</th>
+      <td>235</td>
+      <td>W</td>
+      <td>W</td>
+      <td>NaN</td>
+      <td>W235</td>
+    </tr>
+    <tr>
+      <th>3141</th>
+      <td>235</td>
+      <td>W</td>
+      <td>Y</td>
+      <td>0.000007</td>
+      <td>W235</td>
+    </tr>
+  </tbody>
+</table>
+<p>180 rows × 5 columns</p>
+</div>
+
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+zoomed_df_265 = (data_chk265.loc[data_chk265['site'].isin(sites)]
+                )
+
+zoomed_df_265 = zoomed_df_265.replace(143, 79)
+zoomed_df_265 = zoomed_df_265.replace(305, 241)
+zoomed_df_265 = zoomed_df_265.replace(139, 75)
+zoomed_df_265 = zoomed_df_265.replace(243, 179)
+zoomed_df_265 = zoomed_df_265.replace(283, 219)
+
+zoomed_df_265 = zoomed_df_265.assign(site_label = lambda x: x['wildtype'] + x['site'].astype(str))
+
+zoomed_df_265
+```
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>site</th>
+      <th>wildtype</th>
+      <th>mutation</th>
+      <th>mutdiffsel</th>
+      <th>site_label</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>6666</th>
+      <td>40</td>
+      <td>D</td>
+      <td>A</td>
+      <td>-0.402091</td>
+      <td>D40</td>
+    </tr>
+    <tr>
+      <th>5</th>
+      <td>40</td>
+      <td>D</td>
+      <td>C</td>
+      <td>5.670516</td>
+      <td>D40</td>
+    </tr>
+    <tr>
+      <th>7449</th>
+      <td>40</td>
+      <td>D</td>
+      <td>D</td>
+      <td>NaN</td>
+      <td>D40</td>
+    </tr>
+    <tr>
+      <th>5831</th>
+      <td>40</td>
+      <td>D</td>
+      <td>E</td>
+      <td>-0.035732</td>
+      <td>D40</td>
+    </tr>
+    <tr>
+      <th>211</th>
+      <td>40</td>
+      <td>D</td>
+      <td>F</td>
+      <td>0.952949</td>
+      <td>D40</td>
+    </tr>
+    <tr>
+      <th>...</th>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+    </tr>
+    <tr>
+      <th>7260</th>
+      <td>241</td>
+      <td>L</td>
+      <td>S</td>
+      <td>-2.836240</td>
+      <td>L241</td>
+    </tr>
+    <tr>
+      <th>7001</th>
+      <td>241</td>
+      <td>L</td>
+      <td>T</td>
+      <td>-1.007714</td>
+      <td>L241</td>
+    </tr>
+    <tr>
+      <th>5571</th>
+      <td>241</td>
+      <td>L</td>
+      <td>V</td>
+      <td>-0.001727</td>
+      <td>L241</td>
+    </tr>
+    <tr>
+      <th>6378</th>
+      <td>241</td>
+      <td>L</td>
+      <td>W</td>
+      <td>-0.226428</td>
+      <td>L241</td>
+    </tr>
+    <tr>
+      <th>802</th>
+      <td>241</td>
+      <td>L</td>
+      <td>Y</td>
+      <td>0.212435</td>
+      <td>L241</td>
+    </tr>
+  </tbody>
+</table>
+<p>140 rows × 5 columns</p>
+</div>
+
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+contacts_df_265 = (data_chk265.loc[data_chk265['site'].isin(sites265)]
+                )
+
+# Correct site numbers for p62 numbering (-64)
+contacts_df_265 = contacts_df_265.replace(88,24)
+contacts_df_265 = contacts_df_265.replace(90,26)
+contacts_df_265 = contacts_df_265.replace(91,27)
+contacts_df_265 = contacts_df_265.replace(92,28)
+contacts_df_265 = contacts_df_265.replace(93,29)
+contacts_df_265 = contacts_df_265.replace(121,57)
+contacts_df_265 = contacts_df_265.replace(122,58)
+contacts_df_265 = contacts_df_265.replace(123,59)
+contacts_df_265 = contacts_df_265.replace(128,64)
+contacts_df_265 = contacts_df_265.replace(129,65)
+contacts_df_265 = contacts_df_265.replace(136,72)
+contacts_df_265 = contacts_df_265.replace(137,73)
+contacts_df_265 = contacts_df_265.replace(138,74)
+contacts_df_265 = contacts_df_265.replace(141,77)
+contacts_df_265 = contacts_df_265.replace(143,79)
+contacts_df_265 = contacts_df_265.replace(145,81)
+contacts_df_265 = contacts_df_265.replace(146,82)
+contacts_df_265 = contacts_df_265.replace(148,84)
+contacts_df_265 = contacts_df_265.replace(150,86)
+contacts_df_265 = contacts_df_265.replace(152,88)
+contacts_df_265 = contacts_df_265.replace(154,90)
+contacts_df_265 = contacts_df_265.replace(156,92)
+contacts_df_265 = contacts_df_265.replace(157,93)
+contacts_df_265 = contacts_df_265.replace(168,104)
+contacts_df_265 = contacts_df_265.replace(171,107)
+contacts_df_265 = contacts_df_265.replace(173,109)
+contacts_df_265 = contacts_df_265.replace(174,110)
+contacts_df_265 = contacts_df_265.replace(183,119)
+contacts_df_265 = contacts_df_265.replace(184,120)
+contacts_df_265 = contacts_df_265.replace(185,121)
+contacts_df_265 = contacts_df_265.replace(186,122)
+contacts_df_265 = contacts_df_265.replace(247,183)
+contacts_df_265 = contacts_df_265.replace(248,184)
+contacts_df_265 = contacts_df_265.replace(249,185)
+contacts_df_265 = contacts_df_265.replace(250,186)
+contacts_df_265 = contacts_df_265.replace(251,187)
+contacts_df_265 = contacts_df_265.replace(253,189)
+contacts_df_265 = contacts_df_265.replace(254,190)
+contacts_df_265 = contacts_df_265.replace(257,193)
+contacts_df_265 = contacts_df_265.replace(258,194)
+contacts_df_265 = contacts_df_265.replace(261,197)
+contacts_df_265 = contacts_df_265.replace(263,199)
+contacts_df_265 = contacts_df_265.replace(267,203)
+contacts_df_265 = contacts_df_265.replace(268,204)
+contacts_df_265 = contacts_df_265.replace(269,205)
+contacts_df_265 = contacts_df_265.replace(270,206)
+contacts_df_265 = contacts_df_265.replace(272,208)
+contacts_df_265 = contacts_df_265.replace(273,209)
+contacts_df_265 = contacts_df_265.replace(274,210)
+contacts_df_265 = contacts_df_265.replace(276,212)
+contacts_df_265 = contacts_df_265.replace(277,213)
+contacts_df_265 = contacts_df_265.replace(278,214)
+contacts_df_265 = contacts_df_265.replace(279,215)
+contacts_df_265 = contacts_df_265.replace(280,216)
+contacts_df_265 = contacts_df_265.replace(281,217)
+contacts_df_265 = contacts_df_265.replace(282,218)
+contacts_df_265 = contacts_df_265.replace(283,219)
+contacts_df_265 = contacts_df_265.replace(284,220)
+contacts_df_265 = contacts_df_265.replace(285,221)
+
+contacts_df_265 = contacts_df_265.assign(site_label = lambda x: x['wildtype'] + x['site'].astype(str))
+
+contacts_df_265
+```
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>site</th>
+      <th>wildtype</th>
+      <th>mutation</th>
+      <th>mutdiffsel</th>
+      <th>site_label</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>6171</th>
+      <td>24</td>
+      <td>E</td>
+      <td>A</td>
+      <td>-0.138181</td>
+      <td>E24</td>
+    </tr>
+    <tr>
+      <th>6693</th>
+      <td>24</td>
+      <td>E</td>
+      <td>C</td>
+      <td>-0.422121</td>
+      <td>E24</td>
+    </tr>
+    <tr>
+      <th>5313</th>
+      <td>24</td>
+      <td>E</td>
+      <td>D</td>
+      <td>-0.000595</td>
+      <td>E24</td>
+    </tr>
+    <tr>
+      <th>7497</th>
+      <td>24</td>
+      <td>E</td>
+      <td>E</td>
+      <td>NaN</td>
+      <td>E24</td>
+    </tr>
+    <tr>
+      <th>5670</th>
+      <td>24</td>
+      <td>E</td>
+      <td>F</td>
+      <td>-0.006693</td>
+      <td>E24</td>
+    </tr>
+    <tr>
+      <th>...</th>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+    </tr>
+    <tr>
+      <th>213</th>
+      <td>221</td>
+      <td>K</td>
+      <td>S</td>
+      <td>0.928970</td>
+      <td>K221</td>
+    </tr>
+    <tr>
+      <th>1615</th>
+      <td>221</td>
+      <td>K</td>
+      <td>T</td>
+      <td>0.000731</td>
+      <td>K221</td>
+    </tr>
+    <tr>
+      <th>5595</th>
+      <td>221</td>
+      <td>K</td>
+      <td>V</td>
+      <td>-0.002103</td>
+      <td>K221</td>
+    </tr>
+    <tr>
+      <th>1616</th>
+      <td>221</td>
+      <td>K</td>
+      <td>W</td>
+      <td>0.000731</td>
+      <td>K221</td>
+    </tr>
+    <tr>
+      <th>1617</th>
+      <td>221</td>
+      <td>K</td>
+      <td>Y</td>
+      <td>0.000731</td>
+      <td>K221</td>
+    </tr>
+  </tbody>
+</table>
+<p>1180 rows × 5 columns</p>
+</div>
+
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+# Exclude all non positive mutdiffsel scores
+zoomed_df_11['mutdiffsel'] = zoomed_df_11['mutdiffsel'].mask(zoomed_df_11['mutdiffsel'].lt(0),0)
+
+zoomed_df_152['mutdiffsel'] = zoomed_df_152['mutdiffsel'].mask(zoomed_df_152['mutdiffsel'].lt(0),0)
+
+contacts_df_152['mutdiffsel'] = contacts_df_152['mutdiffsel'].mask(contacts_df_152['mutdiffsel'].lt(0),0)
+
+zoomed_df_265['mutdiffsel'] = zoomed_df_265['mutdiffsel'].mask(zoomed_df_265['mutdiffsel'].lt(0),0)
+
+contacts_df_265['mutdiffsel'] = contacts_df_265['mutdiffsel'].mask(contacts_df_265['mutdiffsel'].lt(0),0)
+```
+
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+contacts_df_265_adom = contacts_df_265[contacts_df_265['site'] <= 134]
+contacts_df_265_bdom = contacts_df_265[contacts_df_265['site'] >= 135]
+
+contacts_df_265_adom
+```
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>site</th>
+      <th>wildtype</th>
+      <th>mutation</th>
+      <th>mutdiffsel</th>
+      <th>site_label</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>6171</th>
+      <td>24</td>
+      <td>E</td>
+      <td>A</td>
+      <td>0.000000</td>
+      <td>E24</td>
+    </tr>
+    <tr>
+      <th>6693</th>
+      <td>24</td>
+      <td>E</td>
+      <td>C</td>
+      <td>0.000000</td>
+      <td>E24</td>
+    </tr>
+    <tr>
+      <th>5313</th>
+      <td>24</td>
+      <td>E</td>
+      <td>D</td>
+      <td>0.000000</td>
+      <td>E24</td>
+    </tr>
+    <tr>
+      <th>7497</th>
+      <td>24</td>
+      <td>E</td>
+      <td>E</td>
+      <td>NaN</td>
+      <td>E24</td>
+    </tr>
+    <tr>
+      <th>5670</th>
+      <td>24</td>
+      <td>E</td>
+      <td>F</td>
+      <td>0.000000</td>
+      <td>E24</td>
+    </tr>
+    <tr>
+      <th>...</th>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+    </tr>
+    <tr>
+      <th>7595</th>
+      <td>122</td>
+      <td>S</td>
+      <td>S</td>
+      <td>NaN</td>
+      <td>S122</td>
+    </tr>
+    <tr>
+      <th>6271</th>
+      <td>122</td>
+      <td>S</td>
+      <td>T</td>
+      <td>0.000000</td>
+      <td>S122</td>
+    </tr>
+    <tr>
+      <th>6751</th>
+      <td>122</td>
+      <td>S</td>
+      <td>V</td>
+      <td>0.000000</td>
+      <td>S122</td>
+    </tr>
+    <tr>
+      <th>6414</th>
+      <td>122</td>
+      <td>S</td>
+      <td>W</td>
+      <td>0.000000</td>
+      <td>S122</td>
+    </tr>
+    <tr>
+      <th>1155</th>
+      <td>122</td>
+      <td>S</td>
+      <td>Y</td>
+      <td>0.087626</td>
+      <td>S122</td>
+    </tr>
+  </tbody>
+</table>
+<p>620 rows × 5 columns</p>
+</div>
+
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+contacts_df_265_bdom
+```
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>site</th>
+      <th>wildtype</th>
+      <th>mutation</th>
+      <th>mutdiffsel</th>
+      <th>site_label</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>1774</th>
+      <td>183</td>
+      <td>Q</td>
+      <td>A</td>
+      <td>0.000491</td>
+      <td>Q183</td>
+    </tr>
+    <tr>
+      <th>6480</th>
+      <td>183</td>
+      <td>Q</td>
+      <td>C</td>
+      <td>0.000000</td>
+      <td>Q183</td>
+    </tr>
+    <tr>
+      <th>1775</th>
+      <td>183</td>
+      <td>Q</td>
+      <td>D</td>
+      <td>0.000491</td>
+      <td>Q183</td>
+    </tr>
+    <tr>
+      <th>263</th>
+      <td>183</td>
+      <td>Q</td>
+      <td>E</td>
+      <td>0.659820</td>
+      <td>Q183</td>
+    </tr>
+    <tr>
+      <th>1776</th>
+      <td>183</td>
+      <td>Q</td>
+      <td>F</td>
+      <td>0.000491</td>
+      <td>Q183</td>
+    </tr>
+    <tr>
+      <th>...</th>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+    </tr>
+    <tr>
+      <th>213</th>
+      <td>221</td>
+      <td>K</td>
+      <td>S</td>
+      <td>0.928970</td>
+      <td>K221</td>
+    </tr>
+    <tr>
+      <th>1615</th>
+      <td>221</td>
+      <td>K</td>
+      <td>T</td>
+      <td>0.000731</td>
+      <td>K221</td>
+    </tr>
+    <tr>
+      <th>5595</th>
+      <td>221</td>
+      <td>K</td>
+      <td>V</td>
+      <td>0.000000</td>
+      <td>K221</td>
+    </tr>
+    <tr>
+      <th>1616</th>
+      <td>221</td>
+      <td>K</td>
+      <td>W</td>
+      <td>0.000731</td>
+      <td>K221</td>
+    </tr>
+    <tr>
+      <th>1617</th>
+      <td>221</td>
+      <td>K</td>
+      <td>Y</td>
+      <td>0.000731</td>
+      <td>K221</td>
+    </tr>
+  </tbody>
+</table>
+<p>560 rows × 5 columns</p>
+</div>
+
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+# Append antibody/domain info to each dataframe then combine
+## ZOOMED
+zoomed_df_11['antibody'] = 'CHK-11'
+zoomed_df_152['antibody'] = 'CHK-152'
+zoomed_df_265['antibody'] = 'CHK-265'
+
+display(zoomed_df_11)
+display(zoomed_df_152)
+display(zoomed_df_265)
+```
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>site</th>
+      <th>wildtype</th>
+      <th>mutation</th>
+      <th>mutdiffsel</th>
+      <th>site_label</th>
+      <th>antibody</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>6804</th>
+      <td>40</td>
+      <td>D</td>
+      <td>A</td>
+      <td>0.000000</td>
+      <td>D40</td>
+      <td>CHK-11</td>
+    </tr>
+    <tr>
+      <th>126</th>
+      <td>40</td>
+      <td>D</td>
+      <td>C</td>
+      <td>2.386392</td>
+      <td>D40</td>
+      <td>CHK-11</td>
+    </tr>
+    <tr>
+      <th>6330</th>
+      <td>40</td>
+      <td>D</td>
+      <td>E</td>
+      <td>0.000000</td>
+      <td>D40</td>
+      <td>CHK-11</td>
+    </tr>
+    <tr>
+      <th>5768</th>
+      <td>40</td>
+      <td>D</td>
+      <td>F</td>
+      <td>0.000000</td>
+      <td>D40</td>
+      <td>CHK-11</td>
+    </tr>
+    <tr>
+      <th>392</th>
+      <td>40</td>
+      <td>D</td>
+      <td>G</td>
+      <td>0.457301</td>
+      <td>D40</td>
+      <td>CHK-11</td>
+    </tr>
+    <tr>
+      <th>...</th>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+    </tr>
+    <tr>
+      <th>6071</th>
+      <td>241</td>
+      <td>L</td>
+      <td>S</td>
+      <td>0.000000</td>
+      <td>L241</td>
+      <td>CHK-11</td>
+    </tr>
+    <tr>
+      <th>6959</th>
+      <td>241</td>
+      <td>L</td>
+      <td>T</td>
+      <td>0.000000</td>
+      <td>L241</td>
+      <td>CHK-11</td>
+    </tr>
+    <tr>
+      <th>6043</th>
+      <td>241</td>
+      <td>L</td>
+      <td>V</td>
+      <td>0.000000</td>
+      <td>L241</td>
+      <td>CHK-11</td>
+    </tr>
+    <tr>
+      <th>6734</th>
+      <td>241</td>
+      <td>L</td>
+      <td>W</td>
+      <td>0.000000</td>
+      <td>L241</td>
+      <td>CHK-11</td>
+    </tr>
+    <tr>
+      <th>1016</th>
+      <td>241</td>
+      <td>L</td>
+      <td>Y</td>
+      <td>0.123828</td>
+      <td>L241</td>
+      <td>CHK-11</td>
+    </tr>
+  </tbody>
+</table>
+<p>133 rows × 6 columns</p>
+</div>
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>site</th>
+      <th>wildtype</th>
+      <th>mutation</th>
+      <th>mutdiffsel</th>
+      <th>site_label</th>
+      <th>antibody</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>6850</th>
+      <td>40</td>
+      <td>D</td>
+      <td>A</td>
+      <td>0.000000</td>
+      <td>D40</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>4009</th>
+      <td>40</td>
+      <td>D</td>
+      <td>C</td>
+      <td>0.000000</td>
+      <td>D40</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>7449</th>
+      <td>40</td>
+      <td>D</td>
+      <td>D</td>
+      <td>NaN</td>
+      <td>D40</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>641</th>
+      <td>40</td>
+      <td>D</td>
+      <td>E</td>
+      <td>0.344012</td>
+      <td>D40</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>7056</th>
+      <td>40</td>
+      <td>D</td>
+      <td>F</td>
+      <td>0.000000</td>
+      <td>D40</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>...</th>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+    </tr>
+    <tr>
+      <th>7140</th>
+      <td>241</td>
+      <td>L</td>
+      <td>S</td>
+      <td>0.000000</td>
+      <td>L241</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>6844</th>
+      <td>241</td>
+      <td>L</td>
+      <td>T</td>
+      <td>0.000000</td>
+      <td>L241</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>498</th>
+      <td>241</td>
+      <td>L</td>
+      <td>V</td>
+      <td>0.460759</td>
+      <td>L241</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>788</th>
+      <td>241</td>
+      <td>L</td>
+      <td>W</td>
+      <td>0.257530</td>
+      <td>L241</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>751</th>
+      <td>241</td>
+      <td>L</td>
+      <td>Y</td>
+      <td>0.281082</td>
+      <td>L241</td>
+      <td>CHK-152</td>
+    </tr>
+  </tbody>
+</table>
+<p>140 rows × 6 columns</p>
+</div>
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>site</th>
+      <th>wildtype</th>
+      <th>mutation</th>
+      <th>mutdiffsel</th>
+      <th>site_label</th>
+      <th>antibody</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>6666</th>
+      <td>40</td>
+      <td>D</td>
+      <td>A</td>
+      <td>0.000000</td>
+      <td>D40</td>
+      <td>CHK-265</td>
+    </tr>
+    <tr>
+      <th>5</th>
+      <td>40</td>
+      <td>D</td>
+      <td>C</td>
+      <td>5.670516</td>
+      <td>D40</td>
+      <td>CHK-265</td>
+    </tr>
+    <tr>
+      <th>7449</th>
+      <td>40</td>
+      <td>D</td>
+      <td>D</td>
+      <td>NaN</td>
+      <td>D40</td>
+      <td>CHK-265</td>
+    </tr>
+    <tr>
+      <th>5831</th>
+      <td>40</td>
+      <td>D</td>
+      <td>E</td>
+      <td>0.000000</td>
+      <td>D40</td>
+      <td>CHK-265</td>
+    </tr>
+    <tr>
+      <th>211</th>
+      <td>40</td>
+      <td>D</td>
+      <td>F</td>
+      <td>0.952949</td>
+      <td>D40</td>
+      <td>CHK-265</td>
+    </tr>
+    <tr>
+      <th>...</th>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+    </tr>
+    <tr>
+      <th>7260</th>
+      <td>241</td>
+      <td>L</td>
+      <td>S</td>
+      <td>0.000000</td>
+      <td>L241</td>
+      <td>CHK-265</td>
+    </tr>
+    <tr>
+      <th>7001</th>
+      <td>241</td>
+      <td>L</td>
+      <td>T</td>
+      <td>0.000000</td>
+      <td>L241</td>
+      <td>CHK-265</td>
+    </tr>
+    <tr>
+      <th>5571</th>
+      <td>241</td>
+      <td>L</td>
+      <td>V</td>
+      <td>0.000000</td>
+      <td>L241</td>
+      <td>CHK-265</td>
+    </tr>
+    <tr>
+      <th>6378</th>
+      <td>241</td>
+      <td>L</td>
+      <td>W</td>
+      <td>0.000000</td>
+      <td>L241</td>
+      <td>CHK-265</td>
+    </tr>
+    <tr>
+      <th>802</th>
+      <td>241</td>
+      <td>L</td>
+      <td>Y</td>
+      <td>0.212435</td>
+      <td>L241</td>
+      <td>CHK-265</td>
+    </tr>
+  </tbody>
+</table>
+<p>140 rows × 6 columns</p>
+</div>
+
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+zoomed_df_concat = pd.concat([zoomed_df_11, zoomed_df_152, zoomed_df_265], axis = 0)
+print("After merging:")
+display(zoomed_df_concat)
+```
+
+    After merging:
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>site</th>
+      <th>wildtype</th>
+      <th>mutation</th>
+      <th>mutdiffsel</th>
+      <th>site_label</th>
+      <th>antibody</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>6804</th>
+      <td>40</td>
+      <td>D</td>
+      <td>A</td>
+      <td>0.000000</td>
+      <td>D40</td>
+      <td>CHK-11</td>
+    </tr>
+    <tr>
+      <th>126</th>
+      <td>40</td>
+      <td>D</td>
+      <td>C</td>
+      <td>2.386392</td>
+      <td>D40</td>
+      <td>CHK-11</td>
+    </tr>
+    <tr>
+      <th>6330</th>
+      <td>40</td>
+      <td>D</td>
+      <td>E</td>
+      <td>0.000000</td>
+      <td>D40</td>
+      <td>CHK-11</td>
+    </tr>
+    <tr>
+      <th>5768</th>
+      <td>40</td>
+      <td>D</td>
+      <td>F</td>
+      <td>0.000000</td>
+      <td>D40</td>
+      <td>CHK-11</td>
+    </tr>
+    <tr>
+      <th>392</th>
+      <td>40</td>
+      <td>D</td>
+      <td>G</td>
+      <td>0.457301</td>
+      <td>D40</td>
+      <td>CHK-11</td>
+    </tr>
+    <tr>
+      <th>...</th>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+    </tr>
+    <tr>
+      <th>7260</th>
+      <td>241</td>
+      <td>L</td>
+      <td>S</td>
+      <td>0.000000</td>
+      <td>L241</td>
+      <td>CHK-265</td>
+    </tr>
+    <tr>
+      <th>7001</th>
+      <td>241</td>
+      <td>L</td>
+      <td>T</td>
+      <td>0.000000</td>
+      <td>L241</td>
+      <td>CHK-265</td>
+    </tr>
+    <tr>
+      <th>5571</th>
+      <td>241</td>
+      <td>L</td>
+      <td>V</td>
+      <td>0.000000</td>
+      <td>L241</td>
+      <td>CHK-265</td>
+    </tr>
+    <tr>
+      <th>6378</th>
+      <td>241</td>
+      <td>L</td>
+      <td>W</td>
+      <td>0.000000</td>
+      <td>L241</td>
+      <td>CHK-265</td>
+    </tr>
+    <tr>
+      <th>802</th>
+      <td>241</td>
+      <td>L</td>
+      <td>Y</td>
+      <td>0.212435</td>
+      <td>L241</td>
+      <td>CHK-265</td>
+    </tr>
+  </tbody>
+</table>
+<p>413 rows × 6 columns</p>
+</div>
+
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+# Append antibody/domain info to each dataframe then combine
+# CONTACTS
+contacts_df_152['antibody'] = 'CHK-152'
+contacts_df_265_adom['antibody'] = 'CHK-265 (A domain)'
+contacts_df_265_bdom['antibody'] = 'CHK-265 (B domain)'
+
+display(contacts_df_152)
+display(contacts_df_265_adom)
+display(contacts_df_265_bdom)
+```
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>site</th>
+      <th>wildtype</th>
+      <th>mutation</th>
+      <th>mutdiffsel</th>
+      <th>site_label</th>
+      <th>antibody</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>7484</th>
+      <td>11</td>
+      <td>A</td>
+      <td>A</td>
+      <td>NaN</td>
+      <td>A11</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>1719</th>
+      <td>11</td>
+      <td>A</td>
+      <td>C</td>
+      <td>0.000583</td>
+      <td>A11</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>1720</th>
+      <td>11</td>
+      <td>A</td>
+      <td>D</td>
+      <td>0.000583</td>
+      <td>A11</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>1727</th>
+      <td>11</td>
+      <td>A</td>
+      <td>E</td>
+      <td>0.000583</td>
+      <td>A11</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>1717</th>
+      <td>11</td>
+      <td>A</td>
+      <td>F</td>
+      <td>0.000583</td>
+      <td>A11</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>...</th>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+    </tr>
+    <tr>
+      <th>3143</th>
+      <td>235</td>
+      <td>W</td>
+      <td>S</td>
+      <td>0.000007</td>
+      <td>W235</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>3144</th>
+      <td>235</td>
+      <td>W</td>
+      <td>T</td>
+      <td>0.000007</td>
+      <td>W235</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>3145</th>
+      <td>235</td>
+      <td>W</td>
+      <td>V</td>
+      <td>0.000007</td>
+      <td>W235</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>7708</th>
+      <td>235</td>
+      <td>W</td>
+      <td>W</td>
+      <td>NaN</td>
+      <td>W235</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>3141</th>
+      <td>235</td>
+      <td>W</td>
+      <td>Y</td>
+      <td>0.000007</td>
+      <td>W235</td>
+      <td>CHK-152</td>
+    </tr>
+  </tbody>
+</table>
+<p>180 rows × 6 columns</p>
+</div>
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>site</th>
+      <th>wildtype</th>
+      <th>mutation</th>
+      <th>mutdiffsel</th>
+      <th>site_label</th>
+      <th>antibody</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>6171</th>
+      <td>24</td>
+      <td>E</td>
+      <td>A</td>
+      <td>0.000000</td>
+      <td>E24</td>
+      <td>CHK-265 (A domain)</td>
+    </tr>
+    <tr>
+      <th>6693</th>
+      <td>24</td>
+      <td>E</td>
+      <td>C</td>
+      <td>0.000000</td>
+      <td>E24</td>
+      <td>CHK-265 (A domain)</td>
+    </tr>
+    <tr>
+      <th>5313</th>
+      <td>24</td>
+      <td>E</td>
+      <td>D</td>
+      <td>0.000000</td>
+      <td>E24</td>
+      <td>CHK-265 (A domain)</td>
+    </tr>
+    <tr>
+      <th>7497</th>
+      <td>24</td>
+      <td>E</td>
+      <td>E</td>
+      <td>NaN</td>
+      <td>E24</td>
+      <td>CHK-265 (A domain)</td>
+    </tr>
+    <tr>
+      <th>5670</th>
+      <td>24</td>
+      <td>E</td>
+      <td>F</td>
+      <td>0.000000</td>
+      <td>E24</td>
+      <td>CHK-265 (A domain)</td>
+    </tr>
+    <tr>
+      <th>...</th>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+    </tr>
+    <tr>
+      <th>7595</th>
+      <td>122</td>
+      <td>S</td>
+      <td>S</td>
+      <td>NaN</td>
+      <td>S122</td>
+      <td>CHK-265 (A domain)</td>
+    </tr>
+    <tr>
+      <th>6271</th>
+      <td>122</td>
+      <td>S</td>
+      <td>T</td>
+      <td>0.000000</td>
+      <td>S122</td>
+      <td>CHK-265 (A domain)</td>
+    </tr>
+    <tr>
+      <th>6751</th>
+      <td>122</td>
+      <td>S</td>
+      <td>V</td>
+      <td>0.000000</td>
+      <td>S122</td>
+      <td>CHK-265 (A domain)</td>
+    </tr>
+    <tr>
+      <th>6414</th>
+      <td>122</td>
+      <td>S</td>
+      <td>W</td>
+      <td>0.000000</td>
+      <td>S122</td>
+      <td>CHK-265 (A domain)</td>
+    </tr>
+    <tr>
+      <th>1155</th>
+      <td>122</td>
+      <td>S</td>
+      <td>Y</td>
+      <td>0.087626</td>
+      <td>S122</td>
+      <td>CHK-265 (A domain)</td>
+    </tr>
+  </tbody>
+</table>
+<p>620 rows × 6 columns</p>
+</div>
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>site</th>
+      <th>wildtype</th>
+      <th>mutation</th>
+      <th>mutdiffsel</th>
+      <th>site_label</th>
+      <th>antibody</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>1774</th>
+      <td>183</td>
+      <td>Q</td>
+      <td>A</td>
+      <td>0.000491</td>
+      <td>Q183</td>
+      <td>CHK-265 (B domain)</td>
+    </tr>
+    <tr>
+      <th>6480</th>
+      <td>183</td>
+      <td>Q</td>
+      <td>C</td>
+      <td>0.000000</td>
+      <td>Q183</td>
+      <td>CHK-265 (B domain)</td>
+    </tr>
+    <tr>
+      <th>1775</th>
+      <td>183</td>
+      <td>Q</td>
+      <td>D</td>
+      <td>0.000491</td>
+      <td>Q183</td>
+      <td>CHK-265 (B domain)</td>
+    </tr>
+    <tr>
+      <th>263</th>
+      <td>183</td>
+      <td>Q</td>
+      <td>E</td>
+      <td>0.659820</td>
+      <td>Q183</td>
+      <td>CHK-265 (B domain)</td>
+    </tr>
+    <tr>
+      <th>1776</th>
+      <td>183</td>
+      <td>Q</td>
+      <td>F</td>
+      <td>0.000491</td>
+      <td>Q183</td>
+      <td>CHK-265 (B domain)</td>
+    </tr>
+    <tr>
+      <th>...</th>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+    </tr>
+    <tr>
+      <th>213</th>
+      <td>221</td>
+      <td>K</td>
+      <td>S</td>
+      <td>0.928970</td>
+      <td>K221</td>
+      <td>CHK-265 (B domain)</td>
+    </tr>
+    <tr>
+      <th>1615</th>
+      <td>221</td>
+      <td>K</td>
+      <td>T</td>
+      <td>0.000731</td>
+      <td>K221</td>
+      <td>CHK-265 (B domain)</td>
+    </tr>
+    <tr>
+      <th>5595</th>
+      <td>221</td>
+      <td>K</td>
+      <td>V</td>
+      <td>0.000000</td>
+      <td>K221</td>
+      <td>CHK-265 (B domain)</td>
+    </tr>
+    <tr>
+      <th>1616</th>
+      <td>221</td>
+      <td>K</td>
+      <td>W</td>
+      <td>0.000731</td>
+      <td>K221</td>
+      <td>CHK-265 (B domain)</td>
+    </tr>
+    <tr>
+      <th>1617</th>
+      <td>221</td>
+      <td>K</td>
+      <td>Y</td>
+      <td>0.000731</td>
+      <td>K221</td>
+      <td>CHK-265 (B domain)</td>
+    </tr>
+  </tbody>
+</table>
+<p>560 rows × 6 columns</p>
+</div>
+
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+contacts_df_concat = pd.concat([contacts_df_152, contacts_df_265_adom, contacts_df_265_bdom], axis = 0)
+print("After merging:")
+display(contacts_df_concat)
+```
+
+    After merging:
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>site</th>
+      <th>wildtype</th>
+      <th>mutation</th>
+      <th>mutdiffsel</th>
+      <th>site_label</th>
+      <th>antibody</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>7484</th>
+      <td>11</td>
+      <td>A</td>
+      <td>A</td>
+      <td>NaN</td>
+      <td>A11</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>1719</th>
+      <td>11</td>
+      <td>A</td>
+      <td>C</td>
+      <td>0.000583</td>
+      <td>A11</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>1720</th>
+      <td>11</td>
+      <td>A</td>
+      <td>D</td>
+      <td>0.000583</td>
+      <td>A11</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>1727</th>
+      <td>11</td>
+      <td>A</td>
+      <td>E</td>
+      <td>0.000583</td>
+      <td>A11</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>1717</th>
+      <td>11</td>
+      <td>A</td>
+      <td>F</td>
+      <td>0.000583</td>
+      <td>A11</td>
+      <td>CHK-152</td>
+    </tr>
+    <tr>
+      <th>...</th>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+      <td>...</td>
+    </tr>
+    <tr>
+      <th>213</th>
+      <td>221</td>
+      <td>K</td>
+      <td>S</td>
+      <td>0.928970</td>
+      <td>K221</td>
+      <td>CHK-265 (B domain)</td>
+    </tr>
+    <tr>
+      <th>1615</th>
+      <td>221</td>
+      <td>K</td>
+      <td>T</td>
+      <td>0.000731</td>
+      <td>K221</td>
+      <td>CHK-265 (B domain)</td>
+    </tr>
+    <tr>
+      <th>5595</th>
+      <td>221</td>
+      <td>K</td>
+      <td>V</td>
+      <td>0.000000</td>
+      <td>K221</td>
+      <td>CHK-265 (B domain)</td>
+    </tr>
+    <tr>
+      <th>1616</th>
+      <td>221</td>
+      <td>K</td>
+      <td>W</td>
+      <td>0.000731</td>
+      <td>K221</td>
+      <td>CHK-265 (B domain)</td>
+    </tr>
+    <tr>
+      <th>1617</th>
+      <td>221</td>
+      <td>K</td>
+      <td>Y</td>
+      <td>0.000731</td>
+      <td>K221</td>
+      <td>CHK-265 (B domain)</td>
+    </tr>
+  </tbody>
+</table>
+<p>1360 rows × 6 columns</p>
+</div>
+
+
+##### Plot logoplots using `dmslogo` {.unnumbered}
+
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+# Draw logoplot for each antibody
+ylim_setter = dmslogo.utils.AxLimSetter(min_upperlim=16)
+
+fig, axes = dmslogo.draw_logo(
+        data=zoomed_df_11,
+        x_col='site',
+        letter_col='mutation',
+        letter_height_col='mutdiffsel',
+        addbreaks=True,
+        xtick_col='site_label',
+        ylabel = 'differential selection\nscore (log$_{2}$)',
+        xlabel = 'mutation site',
+        title = "CHK-11",
+        ylim_setter = ylim_setter
+    )
+```
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+# Export image to png file
+outputdir = "output_files"
+os.makedirs(outputdir, exist_ok=True)
+pngfile = os.path.join(outputdir, "chk11_all_newaxis.png")
+
+print(f"Saving figure to {pngfile}")
+fig.savefig(pngfile, dpi=450, bbox_inches="tight")
+
+print(f"Here is a rendering of the saved figure:")
+display(Image(pngfile, width=200))
+```
+
+    Saving figure to output_files/chk11_all_newaxis.png
+    Here is a rendering of the saved figure:
+
+    
+![](../dmslogo/output_files/chk11_all_newaxis.png)
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+fig, axes = dmslogo.draw_logo(
+        data=zoomed_df_152,
+        x_col='site',
+        letter_col='mutation',
+        letter_height_col='mutdiffsel',
+        addbreaks=True,
+        xtick_col='site_label',
+        ylabel = 'differential selection\nscore (log$_{2}$)',
+        xlabel = 'mutation site',
+        title = "CHK-152",
+        ylim_setter = ylim_setter
+    )
+```
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+outputdir = "output_files"
+os.makedirs(outputdir, exist_ok=True)
+pngfile = os.path.join(outputdir, "chk152_all_newaxis.png")
+
+print(f"Saving figure to {pngfile}")
+fig.savefig(pngfile, dpi=450, bbox_inches="tight")
+
+print(f"Here is a rendering of the saved figure:")
+display(Image(pngfile, width=200))
+```
+
+    Saving figure to output_files/chk152_all_newaxis.png
+    Here is a rendering of the saved figure:
+
+![](../dmslogo/output_files/chk152_all_newaxis.png)
+    
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+fig, axes = dmslogo.draw_logo(
+        data=contacts_df_152,
+        x_col='site',
+        letter_col='mutation',
+        letter_height_col='mutdiffsel',
+        addbreaks=True,
+        xtick_col='site_label',
+        ylabel = 'differential selection\nscore (log$_{2}$)',
+        xlabel = 'published site',
+        title = "CHK-152",
+        ylim_setter = ylim_setter
+    )
+```
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+# Export image to png file
+outputdir = "output_files"
+os.makedirs(outputdir, exist_ok=True)
+pngfile = os.path.join(outputdir, "chk152_contacts_newaxis.png")
+
+print(f"Saving figure to {pngfile}")
+fig.savefig(pngfile, dpi=450, bbox_inches="tight")
+
+print(f"Here is a rendering of the saved figure:")
+display(Image(pngfile, width=200))
+```
+
+    Saving figure to output_files/chk152_contacts_newaxis.png
+    Here is a rendering of the saved figure:
+
+    
+![](../dmslogo/output_files/chk152_contacts_newaxis.png)
+    
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+fig, axes = dmslogo.draw_logo(
+        data=zoomed_df_265,
+        x_col='site',
+        letter_col='mutation',
+        letter_height_col='mutdiffsel',
+        addbreaks=True,
+        xtick_col='site_label',
+        ylabel = 'differential selection\nscore (log$_{2}$)',
+        xlabel = 'mutation site',
+        title = "CHK-265",
+        ylim_setter = ylim_setter
+    )
+```
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+outputdir = "output_files"
+os.makedirs(outputdir, exist_ok=True)
+pngfile = os.path.join(outputdir, "chk265_all_newaxis.png")
+
+print(f"Saving figure to {pngfile}")
+fig.savefig(pngfile, dpi=450, bbox_inches="tight")
+
+print(f"Here is a rendering of the saved figure:")
+display(Image(pngfile, width=200))
+```
+
+    Saving figure to output_files/chk265_all_newaxis.png
+    Here is a rendering of the saved figure:
+
+    
+![](../dmslogo/output_files/chk265_all_newaxis.png)
+    
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+# Combine into one plot
+fig, axes = dmslogo.facet_plot(
+    data = zoomed_df_concat,
+    gridrow_col = "antibody",
+    x_col = "site",
+    show_col = None,
+    draw_logo_kwargs={
+        "letter_col": "mutation",
+        "letter_height_col": "mutdiffsel",
+        "xtick_col": "site_label",
+        "xlabel": "mutation site",
+        "ylabel": "differential selection\nscore (log$_{2}$)",
+        "clip_negative_heights": True,
+    },
+    share_ylabel = True,
+    share_xlabel = True,
+    share_ylim_across_rows = True,
+)
+```
+
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+outputdir = "output_files"
+os.makedirs(outputdir, exist_ok=True)
+pngfile = os.path.join(outputdir, "zoomed_concat_newaxis.png")
+
+print(f"Saving figure to {pngfile}")
+fig.savefig(pngfile, dpi=450, bbox_inches="tight")
+
+print(f"Here is a rendering of the saved figure:")
+display(Image(pngfile, width=200))
+```
+
+    Saving figure to output_files/zoomed_concat_newaxis.png
+    Here is a rendering of the saved figure:
+
+    
+![](../dmslogo/output_files/zoomed_concat_newaxis.png)
+    
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+fig, axes = dmslogo.draw_logo(
+        data=contacts_df_265_adom,
+        x_col='site',
+        letter_col='mutation',
+        letter_height_col='mutdiffsel',
+        addbreaks=True,
+        xtick_col='site_label',
+        ylabel = 'differential selection\nscore (log$_{2}$)',
+        xlabel = 'published site',
+        title = "CHK-265 (A domain)",
+        ylim_setter = ylim_setter
+    )
+```
+    
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+outputdir = "output_files"
+os.makedirs(outputdir, exist_ok=True)
+pngfile = os.path.join(outputdir, "chk265_contacts_adom_newaxis.png")
+
+print(f"Saving figure to {pngfile}")
+fig.savefig(pngfile, dpi=450, bbox_inches="tight")
+
+print(f"Here is a rendering of the saved figure:")
+display(Image(pngfile, width=200))
+```
+
+    Saving figure to output_files/chk265_contacts_adom_newaxis.png
+    Here is a rendering of the saved figure:
+    
+![](../dmslogo/output_files/chk265_contacts_adom_newaxis.png)
+    
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+fig, axes = dmslogo.draw_logo(
+        data=contacts_df_265_bdom,
+        x_col='site',
+        letter_col='mutation',
+        letter_height_col='mutdiffsel',
+        addbreaks=True,
+        xtick_col='site_label',
+        ylabel = 'differential selection\nscore (log$_{2}$)',
+        xlabel = 'published site',
+        title = "CHK-265 (B domain)",
+        ylim_setter = ylim_setter
+    )
+```
+
+```{python, class="highlight-gray"}
+#| eval: false
+#| python.reticulate: false
+#| code-line-numbers: false
+#| code-overflow: wrap
+outputdir = "output_files"
+os.makedirs(outputdir, exist_ok=True)
+pngfile = os.path.join(outputdir, "chk265_contacts_bdom_newaxis.png")
+
+print(f"Saving figure to {pngfile}")
+fig.savefig(pngfile, dpi=450, bbox_inches="tight")
+
+print(f"Here is a rendering of the saved figure:")
+display(Image(pngfile, width=200))
+```
+
+    Saving figure to output_files/chk265_contacts_bdom_newaxis.png
+    Here is a rendering of the saved figure:
+
+![](../dmslogo/output_files/chk265_contacts_bdom_newaxis.png)
+    
+
+</details>
+
+### `dms-viz`
+
+*Generating interactive plots to visualize mutational tolerance and antibody escape across CHIKV domains.*
+
+#### Formatting
+
+<details>
+<summary>Expand to View Code Block</summary>
+
+```{.R filename="step7_dms-viz_prep.R"}
+#!/usr/bin/Rscript
+
+# GOAL: Convert the 'ndet' metric for mutVirus.p2 to binary for tooltips heatmap 
+# Packages to load
+library(dplyr)
+
+# Megalogo output already has long format for detected amino acids, so read in CSV for my reference df
+df1 <- read.csv("./06132023/VirVarSeq/results/mixture_model/megalogo/filtered_mutVirus_p2_mega.csv")
+
+# Read in both structures' existing dms-viz CSV files (PDB: 3N42, 3J2W)
+df2 <- read.csv("./dms-viz/inputs/p2vsDNAerror_prefs_entropy_ndet_long_viz_3n42.csv")
+df3 <- read.csv("./dms-viz/inputs/p2vsDNAerror_prefs_entropy_ndet_long_viz_3j2w.csv")
+
+# Create a new variable ('MERGE_AA_p62') that combines the p62 numbering with AA to reference in the binary output
+df1$MERGE_AA_p62 <- paste(df1$POSITION_p62, df1$AA)
+df2$MERGE_AA_p62 <- paste(df2$p62_site, df2$mutant)
+df3$MERGE_AA_p62 <- paste(df3$site, df3$mutant)
+
+# Create a new variable ('NDET_SITE') that reports a '1' if it was detected in mutVirus.p2 (per megalogo file), or '0' if not
+df2 <- df2 %>%
+  mutate(ndet_site = if_else(MERGE_AA_p62 %in% df1$MERGE_AA_p62, "1", "0"))
+
+df3 <- df3 %>%
+  mutate(ndet_site = if_else(MERGE_AA_p62 %in% df1$MERGE_AA_p62, "1", "0"))
+
+# Write the new dataframe to CSV for dms-viz JSON creation
+write.csv(df2, "./dms-viz/inputs/p2vsDNAerror_prefs_entropy_ndet_long_viz_3n42_site.csv", row.names = FALSE)
+write.csv(df3, "./dms-viz/inputs/p2vsDNAerror_prefs_entropy_ndet_long_viz_3j2w_site.csv", row.names = FALSE)
+```
+
+</details>
+
+#### Visualization
+
+##### *Standard View* {.unnumbered}
+
+<details>
+<summary>Expand to View Code Block</summary>
+
+```{.bash filename="step8_dms-viz.sh"}
+#!/bin/bash
+
+conda activate dms_viz
+
+configure-dms-viz format \
+--name "CHIKV 'ndet' (3J2W)" \
+--input ./inputs/p2vsDNAerror_prefs_entropy_ndet_long_viz_3j2w_site.csv \
+--metric "ndet_site" \
+--metric-name "AA Detected" \
+--condition "epitope" \
+--condition-name "E2" \
+--structure ./inputs/modified_3J2W.pdb \
+--sitemap ./inputs/sitemap_3j2w.csv \
+--output ./outputs/chikv_ndet_3j2w.json \
+--alphabet "ACDEFGHIKLMNPQRSTVWY" \
+--included-chains "N O P" \
+--excluded-chains "A E F G H I J K L M Q R S T" \
+--check-pdb TRUE \
+--colors "#b00000" \
+--heatmap-limits 0,1 \
+--floor True \
+--tooltip-cols "{'mutdiffsel_11': 'CHK-11 Escape', 'mutdiffsel_152': 'CHK-152 Escape', 'mutdiffsel_265': 'CHK-265 Escape'}" \
+--title "CHIKV 'ndet'" \
+--summary-stat "sum"
+
+configure-dms-viz format \
+--name "CHIKV 'ndet' (3N42)" \
+--input ./inputs/p2vsDNAerror_prefs_entropy_ndet_long_viz_3n42_site.csv \
+--metric "ndet_site" \
+--metric-name "AA Detected" \
+--condition "epitope" \
+--condition-name "p62" \
+--structure ./inputs/3n42.pdb \
+--sitemap ./inputs/sitemap_3n42.csv \
+--output ./outputs/chikv_ndet_3n42.json \
+--alphabet "ACDEFGHIKLMNPQRSTVWY" \
+--included-chains "A B" \
+--check-pdb TRUE \
+--colors "#b00000" \
+--heatmap-limits 0,1 \
+--floor True \
+--tooltip-cols "{'mutdiffsel_11': 'CHK-11 Escape', 'mutdiffsel_152': 'CHK-152 Escape', 'mutdiffsel_265': 'CHK-265 Escape'}" \
+--title "CHIKV 'ndet'" \
+--summary-stat "sum"
+
+configure-dms-viz format \
+--name "CHK-11 Escape (3J2W)" \
+--input ./inputs/p2vsDNAerror_prefs_entropy_ndet_long_viz_3j2w.csv \
+--metric "mutdiffsel_11" \
+--metric-name "Diff Sel (log2)" \
+--condition "epitope" \
+--condition-name "E2" \
+--structure ./inputs/modified_3J2W.pdb \
+--sitemap ./inputs/sitemap_3j2w.csv \
+--output ./outputs/chikv_chk11_3j2w.json \
+--alphabet "ACDEFGHIKLMNPQRSTVWY" \
+--included-chains "N O P" \
+--excluded-chains "A E F G H I J K L M Q R S T" \
+--check-pdb TRUE \
+--colors "#b00000" \
+--heatmap-limits 0,13 \
+--floor True \
+--tooltip-cols "{'ndet': '# AA Detected'}" \
+--title "CHK-11 Escape" \
+--summary-stat "sum"
+
+configure-dms-viz format \
+--name "CHK-152 Escape (3J2W)" \
+--input ./inputs/p2vsDNAerror_prefs_entropy_ndet_long_viz_3j2w.csv \
+--metric "mutdiffsel_152" \
+--metric-name "Diff Sel (log2)" \
+--condition "epitope" \
+--condition-name "E2" \
+--structure ./inputs/modified_3J2W.pdb \
+--sitemap ./inputs/sitemap_3j2w.csv \
+--output ./outputs/chikv_chk152_3j2w.json \
+--alphabet "ACDEFGHIKLMNPQRSTVWY" \
+--included-chains "N O P" \
+--excluded-chains "A E F G H I J K L M Q R S T" \
+--check-pdb TRUE \
+--colors "#b00000" \
+--heatmap-limits 0,13 \
+--floor True \
+--tooltip-cols "{'ndet': '# AA Detected'}" \
+--title "CHK-152 Escape" \
+--summary-stat "sum"
+
+configure-dms-viz format \
+--name "CHK-265 Escape (3J2W)" \
+--input ./inputs/p2vsDNAerror_prefs_entropy_ndet_long_viz_3j2w.csv \
+--metric "mutdiffsel_265" \
+--metric-name "Diff Sel (log2)" \
+--condition "epitope" \
+--condition-name "E2" \
+--structure ./inputs/modified_3J2W.pdb \
+--sitemap ./inputs/sitemap_3j2w.csv \
+--output ./outputs/chikv_chk265_3j2w.json \
+--alphabet "ACDEFGHIKLMNPQRSTVWY" \
+--included-chains "N O P" \
+--excluded-chains "A E F G H I J K L M Q R S T" \
+--check-pdb TRUE \
+--colors "#b00000" \
+--heatmap-limits 0,13 \
+--floor True \
+--tooltip-cols "{'ndet': '# AA Detected'}" \
+--title "CHK-265 Escape" \
+--summary-stat "sum"
+
+configure-dms-viz format \
+--name "CHK-11 Escape (3N42)" \
+--input ./inputs/p2vsDNAerror_prefs_entropy_ndet_long_viz_3n42.csv \
+--metric "mutdiffsel_11" \
+--metric-name "Diff Sel (log2)" \
+--condition "epitope" \
+--condition-name "p62" \
+--structure ./inputs/3n42.pdb \
+--sitemap ./inputs/sitemap_3n42.csv \
+--output ./outputs/chikv_chk11_3n42.json \
+--alphabet "ACDEFGHIKLMNPQRSTVWY" \
+--included-chains "A B" \
+--check-pdb TRUE \
+--colors "#b00000" \
+--heatmap-limits 0,13 \
+--floor True \
+--tooltip-cols "{'ndet': '# AA Detected'}" \
+--title "CHK-11 Escape" \
+--summary-stat "sum"
+
+configure-dms-viz format \
+--name "CHK-152 Escape (3N42)" \
+--input ./inputs/p2vsDNAerror_prefs_entropy_ndet_long_viz_3n42.csv \
+--metric "mutdiffsel_152" \
+--metric-name "Diff Sel (log2)" \
+--condition "epitope" \
+--condition-name "p62" \
+--structure ./inputs/3n42.pdb \
+--sitemap ./inputs/sitemap_3n42.csv \
+--output ./outputs/chikv_chk152_3n42.json \
+--alphabet "ACDEFGHIKLMNPQRSTVWY" \
+--included-chains "A B" \
+--check-pdb TRUE \
+--colors "#b00000" \
+--heatmap-limits 0,13 \
+--floor True \
+--tooltip-cols "{'ndet': '# AA Detected'}" \
+--title "CHK-152 Escape" \
+--summary-stat "sum"
+
+configure-dms-viz format \
+--name "CHK-265 Escape (3N42)" \
+--input ./inputs/p2vsDNAerror_prefs_entropy_ndet_long_viz_3n42.csv \
+--metric "mutdiffsel_265" \
+--metric-name "Diff Sel (log2)" \
+--condition "epitope" \
+--condition-name "p62" \
+--structure ./inputs/3n42.pdb \
+--sitemap ./inputs/sitemap_3n42.csv \
+--output ./outputs/chikv_chk265_3n42.json \
+--alphabet "ACDEFGHIKLMNPQRSTVWY" \
+--included-chains "A B" \
+--check-pdb TRUE \
+--colors "#b00000" \
+--heatmap-limits 0,13 \
+--floor True \
+--tooltip-cols "{'ndet': '# AA Detected'}" \
+--title "CHK-265 Escape" \
+--summary-stat "sum"
+
+configure-dms-viz join \
+--input ./outputs/chikv_ndet_3j2w.json,./outputs/chikv_ndet_3n42.json,./outputs/chikv_chk11_3j2w.json,./outputs/chikv_chk152_3j2w.json,./outputs/chikv_chk265_3j2w.json,./outputs/chikv_chk11_3n42.json,./outputs/chikv_chk152_3n42.json,./outputs/chikv_chk265_3n42.json \
+--output ./outputs/chikv_all.json \
+--description ./viz-description.md
+
+
+### E1 is R92 G92 B92
+#### Protein Representation: Cartoon (default)
+#### Peripheral Representation: Surface
+#### Change Peripheral Color to R92 G92 B92
+#### Select All Sites
+#### Selection Representation: Surface
+#### Download Protein Image
+
+conda deactivate
+```
+
+</details>
+
+##### *Colored by Domain* {.unnumbered}
+
+<details>
+<summary>Expand to View Code Block</summary>
+
+```{.bash filename="step8_dms-viz-domain.sh"}
+#!/bin/bash
+
+conda activate dms_viz
+
+configure-dms-viz format \
+--name "CHIKV 'ndet' (3J2W)" \
+--input ./inputs/p2vsDNAerror_prefs_entropy_ndet_long_viz_3j2w_site.csv \
+--metric "ndet_site" \
+--metric-name "AA Detected" \
+--condition "domain" \
+--condition-name "Domain" \
+--structure ./inputs/modified_3j2w.pdb \
+--sitemap ./inputs/sitemap_3j2w.csv \
+--output ./outputs/chikv_ndet_3j2w_domain.json \
+--alphabet "ACDEFGHIKLMNPQRSTVWY" \
+--included-chains "N O P" \
+--excluded-chains "A E F G H I J K L M Q R S T" \
+--check-pdb TRUE \
+--colors "#b00000,#b00000,#b00000,#b00000,#b00000,#b00000" \
+--heatmap-limits 0,1 \
+--floor True \
+--tooltip-cols "{'mutdiffsel_11': 'CHK-11 Escape', 'mutdiffsel_152': 'CHK-152 Escape', 'mutdiffsel_265': 'CHK-265 Escape'}" \
+--title "CHIKV 'ndet'" \
+--summary-stat "sum"
+
+configure-dms-viz format \
+--name "CHIKV 'ndet' (3N42)" \
+--input ./inputs/p2vsDNAerror_prefs_entropy_ndet_long_viz_3n42_site.csv \
+--metric "ndet_site" \
+--metric-name "AA Detected" \
+--condition "domain" \
+--condition-name "Domain" \
+--structure ./inputs/3n42.pdb \
+--sitemap ./inputs/sitemap_3n42.csv \
+--output ./outputs/chikv_ndet_3n42_domain.json \
+--alphabet "ACDEFGHIKLMNPQRSTVWY" \
+--included-chains "A B" \
+--check-pdb TRUE \
+--colors "#b00000,#b00000,#b00000,#b00000,#b00000,#b00000,#b00000" \
+--heatmap-limits 0,1 \
+--floor True \
+--tooltip-cols "{'mutdiffsel_11': 'CHK-11 Escape', 'mutdiffsel_152': 'CHK-152 Escape', 'mutdiffsel_265': 'CHK-265 Escape'}" \
+--title "CHIKV 'ndet'" \
+--summary-stat "sum"
+
+configure-dms-viz format \
+--name "CHK-11 Escape (3J2W)" \
+--input ./inputs/p2vsDNAerror_prefs_entropy_ndet_long_viz_3j2w.csv \
+--metric "mutdiffsel_11" \
+--metric-name "Diff Sel (log2)" \
+--condition "domain" \
+--condition-name "Domain" \
+--structure ./inputs/modified_3J2W.pdb \
+--sitemap ./inputs/sitemap_3j2w.csv \
+--output ./outputs/chikv_chk11_3j2w_domain.json \
+--alphabet "ACDEFGHIKLMNPQRSTVWY" \
+--included-chains "N O P" \
+--excluded-chains "A E F G H I J K L M Q R S T" \
+--check-pdb TRUE \
+--colors "#b00000,#b00000,#b00000,#b00000,#b00000,#b00000" \
+--heatmap-limits 0,13 \
+--floor True \
+--tooltip-cols "{'ndet': '# AA Detected'}" \
+--title "CHK-11 Escape" \
+--summary-stat "sum"
+
+configure-dms-viz format \
+--name "CHK-152 Escape (3J2W)" \
+--input ./inputs/p2vsDNAerror_prefs_entropy_ndet_long_viz_3j2w.csv \
+--metric "mutdiffsel_152" \
+--metric-name "Diff Sel (log2)" \
+--condition "domain" \
+--condition-name "Domain" \
+--structure ./inputs/modified_3J2W.pdb \
+--sitemap ./inputs/sitemap_3j2w.csv \
+--output ./outputs/chikv_chk152_3j2w_domain.json \
+--alphabet "ACDEFGHIKLMNPQRSTVWY" \
+--included-chains "N O P" \
+--excluded-chains "A E F G H I J K L M Q R S T" \
+--check-pdb TRUE \
+--colors "#b00000,#b00000,#b00000,#b00000,#b00000,#b00000" \
+--heatmap-limits 0,13 \
+--floor True \
+--tooltip-cols "{'ndet': '# AA Detected'}" \
+--title "CHK-152 Escape" \
+--summary-stat "sum"
+
+configure-dms-viz format \
+--name "CHK-265 Escape (3J2W)" \
+--input ./inputs/p2vsDNAerror_prefs_entropy_ndet_long_viz_3j2w.csv \
+--metric "mutdiffsel_265" \
+--metric-name "Diff Sel (log2)" \
+--condition "domain" \
+--condition-name "Domain" \
+--structure ./inputs/modified_3J2W.pdb \
+--sitemap ./inputs/sitemap_3j2w.csv \
+--output ./outputs/chikv_chk265_3j2w_domain.json \
+--alphabet "ACDEFGHIKLMNPQRSTVWY" \
+--included-chains "N O P" \
+--excluded-chains "A E F G H I J K L M Q R S T" \
+--check-pdb TRUE \
+--colors "#b00000,#b00000,#b00000,#b00000,#b00000,#b00000" \
+--heatmap-limits 0,13 \
+--floor True \
+--tooltip-cols "{'ndet': '# AA Detected'}" \
+--title "CHK-265 Escape" \
+--summary-stat "sum"
+
+configure-dms-viz format \
+--name "CHK-11 Escape (3N42)" \
+--input ./inputs/p2vsDNAerror_prefs_entropy_ndet_long_viz_3n42.csv \
+--metric "mutdiffsel_11" \
+--metric-name "Diff Sel (log2)" \
+--condition "domain" \
+--condition-name "Domain" \
+--structure ./inputs/3n42.pdb \
+--sitemap ./inputs/sitemap_3n42.csv \
+--output ./outputs/chikv_chk11_3n42_domain.json \
+--alphabet "ACDEFGHIKLMNPQRSTVWY" \
+--included-chains "A B" \
+--check-pdb TRUE \
+--colors "#b00000,#b00000,#b00000,#b00000,#b00000,#b00000,#b00000" \
+--heatmap-limits 0,13 \
+--floor True \
+--tooltip-cols "{'ndet': '# AA Detected'}" \
+--title "CHK-11 Escape" \
+--summary-stat "sum"
+
+configure-dms-viz format \
+--name "CHK-152 Escape (3N42)" \
+--input ./inputs/p2vsDNAerror_prefs_entropy_ndet_long_viz_3n42.csv \
+--metric "mutdiffsel_152" \
+--metric-name "Diff Sel (log2)" \
+--condition "domain" \
+--condition-name "Domain" \
+--structure ./inputs/3n42.pdb \
+--sitemap ./inputs/sitemap_3n42.csv \
+--output ./outputs/chikv_chk152_3n42_domain.json \
+--alphabet "ACDEFGHIKLMNPQRSTVWY" \
+--included-chains "A B" \
+--check-pdb TRUE \
+--colors "#b00000,#b00000,#b00000,#b00000,#b00000,#b00000,#b00000" \
+--heatmap-limits 0,13 \
+--floor True \
+--tooltip-cols "{'ndet': '# AA Detected'}" \
+--title "CHK-152 Escape" \
+--summary-stat "sum"
+
+configure-dms-viz format \
+--name "CHK-265 Escape (3N42)" \
+--input ./inputs/p2vsDNAerror_prefs_entropy_ndet_long_viz_3n42.csv \
+--metric "mutdiffsel_265" \
+--metric-name "Diff Sel (log2)" \
+--condition "domain" \
+--condition-name "Domain" \
+--structure ./inputs/3n42.pdb \
+--sitemap ./inputs/sitemap_3n42.csv \
+--output ./outputs/chikv_chk265_3n42_domain.json \
+--alphabet "ACDEFGHIKLMNPQRSTVWY" \
+--included-chains "A B" \
+--check-pdb TRUE \
+--colors "#b00000,#b00000,#b00000,#b00000,#b00000,#b00000,#b00000" \
+--heatmap-limits 0,13 \
+--floor True \
+--tooltip-cols "{'ndet': '# AA Detected'}" \
+--title "CHK-265 Escape" \
+--summary-stat "sum"
+
+configure-dms-viz join \
+--input ./outputs/chikv_ndet_3j2w_domain.json,./outputs/chikv_ndet_3n42_domain.json,./outputs/chikv_chk11_3j2w_domain.json,./outputs/chikv_chk152_3j2w_domain.json,./outputs/chikv_chk265_3j2w_domain.json,./outputs/chikv_chk11_3n42_domain.json,./outputs/chikv_chk152_3n42_domain.json,./outputs/chikv_chk265_3n42_domain.json \
+--output ./outputs/chikv_all_domain.json \
+--description ./viz-description.md
+
+### E1 is R92 G92 B92
+### E2 is R135 G145 B225 for 3n42
+#### Protein Representation: Surface
+##### Change Protein Color to R135 G145 B225 for 3n42
+#### Peripheral Representation: Surface
+#### Change Peripheral Color to R92 G92 B92
+#### Select All Sites
+##### Select E3 domain for 3n42
+#### Selection Representation: Surface
+#### Download Protein Image
+
+conda deactivate
+```
+
+</details>
+
+
+## Citation {.unnumbered}
+
+The following citation can be used to reference this Wiki document.

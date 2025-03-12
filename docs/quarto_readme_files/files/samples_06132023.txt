@@ -1,3 +1,0 @@
-wtDNA_seed06212023_subsampled_25000000
-mutVirus_p1_seed06212023_subsampled_25000000
-mutVirus_p2_seed06212023_subsampled_25000000
